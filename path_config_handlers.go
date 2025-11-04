@@ -32,8 +32,9 @@ func (b *Backend) pathConfigRead(ctx context.Context, req *logical.Request, data
 
 	return &logical.Response{
 		Data: map[string]any{
-			"issuer":      config.Issuer,
-			"default_ttl": config.DefaultTTL.String(),
+			"issuer":            config.Issuer,
+			"default_ttl":       config.DefaultTTL.String(),
+			"delegate_jwks_uri": config.DelegateJWKSURI,
 			// Note: Do NOT return signing_key (sensitive)
 		},
 	}, nil
@@ -65,6 +66,11 @@ func (b *Backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 		config.DefaultTTL = time.Duration(ttl.(int)) * time.Second
 	} else {
 		config.DefaultTTL = 24 * time.Hour // Default
+	}
+
+	// Get delegate_jwks_uri (required)
+	if delegateJWKSURI, ok := data.GetOk("delegate_jwks_uri"); ok {
+		config.DelegateJWKSURI = delegateJWKSURI.(string)
 	}
 
 	// Store configuration

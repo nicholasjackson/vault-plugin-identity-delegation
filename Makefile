@@ -54,7 +54,7 @@ clean: ## Clean build artifacts and test data
 	@rm -rf ./data
 	@echo "✓ Cleaned"
 
-dev-vault: ## Start Vault dev server with plugin (auto-register and enable)
+dev-vault: build ## Start Vault dev server with plugin (auto-register and enable)
 	@./scripts/dev-vault.sh
 
 dev-vault-manual: build ## Start Vault dev server (manual registration required)

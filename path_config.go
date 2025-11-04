@@ -17,6 +17,9 @@ type Config struct {
 
 	// DefaultTTL is the default time-to-live for generated tokens
 	DefaultTTL time.Duration `json:"default_ttl"`
+
+	// DelegateJWKSURI is the URI for the JWKS to be included in delegated tokens
+	DelegateJWKSURI string `json:"delegate_jwks_uri"`
 }
 
 // Storage key for configuration
@@ -47,6 +50,11 @@ func pathConfig(b *Backend) *framework.Path {
 				Type:        framework.TypeDurationSecond,
 				Description: "Default TTL for generated tokens (e.g., '24h', '1h')",
 				Default:     "24h",
+			},
+			"delegate_jwks_uri": {
+				Type:        framework.TypeString,
+				Description: "The URI for the JWKS to be included in delegated tokens",
+				Required:    true,
 			},
 		},
 

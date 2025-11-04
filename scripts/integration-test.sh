@@ -144,6 +144,7 @@ PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
 vault write identity-delegation/config \
     issuer="https://vault.example.com" \
     signing_key="$PRIVATE_KEY" \
+    delegate_jwks_uri="https://vault.example.com/.well-known/jwks.json" \
     default_ttl="1h" > /dev/null
 
 # Read config (should not show signing key)
@@ -209,13 +210,15 @@ echo ""
 echo "Test 4: Token exchange..."
 echo "Note: Full token exchange testing requires properly signed JWTs."
 echo "The Go tests (go test) cover JWT validation and exchange logic."
-echo "✓ Skipping token exchange (covered by unit tests)"
 echo ""
 
+vault write identity-delegation/token/test-role-1 \
+    subject_token="$OIDC_TOKEN"
+
 # Cleanup
-echo "Test 5: Cleanup..."
-vault delete identity-delegation/role/test-role-1 > /dev/null
-vault delete identity-delegation/config > /dev/null
+#echo "Test 5: Cleanup..."
+#vault delete identity-delegation/role/test-role-1 > /dev/null
+#vault delete identity-delegation/config > /dev/null
 
 echo "✓ Cleanup completed"
 echo ""
