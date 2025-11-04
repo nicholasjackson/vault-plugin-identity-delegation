@@ -144,7 +144,7 @@ PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
 vault write identity-delegation/config \
     issuer="https://vault.example.com" \
     signing_key="$PRIVATE_KEY" \
-    delegate_jwks_uri="http://127.0.0.1:8200/v1/identity/oidc/.well-known/keys " \
+    delegate_jwks_uri="http://127.0.0.1:8200/v1/identity/oidc/.well-known/keys" \
     default_ttl="1h" > /dev/null
 
 # Read config (should not show signing key)

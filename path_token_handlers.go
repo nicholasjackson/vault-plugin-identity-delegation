@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -127,7 +128,7 @@ func validateAndParseClaims(tokenStr string, jwksURI string) (map[string]any, er
 	kid := parsedToken.Headers[0].KeyID
 	key := jwks.Key(kid)
 	if len(key) == 0 {
-		return nil, fmt.Errorf("key not found in JWKS")
+		return nil, fmt.Errorf("key not found in JWKS, kid: %s, jwks: %s", kid, jwksURI)
 	}
 
 	// Verify signature and extract claims
@@ -146,8 +147,17 @@ func fetchJWKS(url string) (*jose.JSONWebKeySet, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch jwks: %s, status %d", url, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read response from jwks, %s", err)
+	}
+
 	var jwks jose.JSONWebKeySet
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+	if err := json.Unmarshal(body, &jwks); err != nil {
 		return nil, err
 	}
 
