@@ -21,7 +21,7 @@ make dev-vault
 - Starts Vault dev server in background
 - Waits for Vault to be ready
 - Registers the plugin
-- Enables it at /token-exchange
+- Enables it at /identity-delegation
 - Displays logs and keeps running
 - Press Ctrl+C to stop
 

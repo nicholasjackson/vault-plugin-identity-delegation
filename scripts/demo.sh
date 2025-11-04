@@ -10,7 +10,7 @@ export VAULT_ADDR
 export VAULT_TOKEN
 
 echo "=========================================="
-echo "Vault Token Exchange Plugin Demo"
+echo "Vault Identity Delegation Plugin Demo"
 echo "=========================================="
 echo ""
 echo "Vault Address: $VAULT_ADDR"
@@ -25,7 +25,7 @@ if ! vault status > /dev/null 2>&1; then
 fi
 
 # Check if plugin is enabled
-if ! vault secrets list | grep -q "token-exchange"; then
+if ! vault secrets list | grep -q "identity-delegation"; then
     echo "❌ Error: Plugin not enabled"
     echo "Please enable the plugin first:"
     echo "  make register enable"
@@ -52,7 +52,7 @@ echo ""
 echo "Step 2: Configuring plugin..."
 PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
 
-vault write token-exchange/config \
+vault write identity-delegation/config \
     issuer="https://vault.example.com" \
     signing_key="$PRIVATE_KEY" \
     default_ttl="1h"
@@ -62,7 +62,7 @@ echo ""
 
 # Create a role
 echo "Step 3: Creating role 'demo-role'..."
-vault write token-exchange/role/demo-role \
+vault write identity-delegation/role/demo-role \
     ttl="1h" \
     template='{"act": {"sub": "agent-123", "name": "Demo Agent"}, "scope": "read write"}' \
     bound_issuer="https://idp.example.com" \
@@ -73,12 +73,12 @@ echo ""
 
 # List roles
 echo "Step 4: Listing roles..."
-vault list token-exchange/role/
+vault list identity-delegation/role/
 echo ""
 
 # Read the role
 echo "Step 5: Reading role details..."
-vault read token-exchange/role/demo-role
+vault read identity-delegation/role/demo-role
 echo ""
 
 # Generate a test subject token
@@ -138,12 +138,12 @@ echo ""
 
 # Since we don't have a real signed JWT, let's show what the API call would look like
 echo "API call would be:"
-echo "vault write token-exchange/token/demo-role subject_token=\"<JWT>\""
+echo "vault write identity-delegation/token/demo-role subject_token=\"<JWT>\""
 echo ""
 
 # Show configuration
 echo "Step 8: Reading configuration (signing key is hidden)..."
-vault read token-exchange/config
+vault read identity-delegation/config
 echo ""
 
 # Cleanup
@@ -157,9 +157,9 @@ echo "=========================================="
 echo ""
 echo "The plugin is ready to use. To exchange tokens:"
 echo "  1. Obtain a valid JWT from your IdP"
-echo "  2. Run: vault write token-exchange/token/demo-role subject_token=\"<JWT>\""
+echo "  2. Run: vault write identity-delegation/token/demo-role subject_token=\"<JWT>\""
 echo ""
 echo "To clean up:"
-echo "  vault delete token-exchange/role/demo-role"
-echo "  vault delete token-exchange/config"
+echo "  vault delete identity-delegation/role/demo-role"
+echo "  vault delete identity-delegation/config"
 echo ""

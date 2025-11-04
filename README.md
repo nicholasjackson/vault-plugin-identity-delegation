@@ -1,6 +1,6 @@
-# Vault Plugin: Token Exchange
+# Vault Plugin: Identity Delegation
 
-A HashiCorp Vault secrets engine plugin that implements OAuth 2.0 Token Exchange (RFC 8693) for "on behalf of" scenarios with OIDC tokens.
+A HashiCorp Vault secrets engine plugin that implements OAuth 2.0 Token Exchange (RFC 8693) for identity delegation and "on behalf of" scenarios with OIDC tokens.
 
 ## Purpose
 
@@ -24,7 +24,7 @@ This plugin enables AI agents and services to exchange existing OIDC tokens for 
 make build
 
 # Or manually
-go build -o bin/vault-plugin-token-exchange cmd/vault-plugin-token-exchange/main.go
+go build -o bin/vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
 ```
 
 ### Testing
@@ -90,7 +90,7 @@ make register enable
 
 ```bash
 # Build the plugin
-go build -o bin/vault-plugin-token-exchange cmd/vault-plugin-token-exchange/main.go
+go build -o bin/vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
 
 # Start Vault in dev mode
 vault server -dev -dev-plugin-dir=./bin
@@ -98,9 +98,9 @@ vault server -dev -dev-plugin-dir=./bin
 # In another terminal, register and enable
 export VAULT_ADDR='http://127.0.0.1:8200'
 export VAULT_TOKEN='root'
-SHA256=$(shasum -a 256 bin/vault-plugin-token-exchange | cut -d' ' -f1)
-vault plugin register -sha256=$SHA256 secret vault-plugin-token-exchange
-vault secrets enable -path=token-exchange vault-plugin-token-exchange
+SHA256=$(shasum -a 256 bin/vault-plugin-identity-delegation | cut -d' ' -f1)
+vault plugin register -sha256=$SHA256 secret vault-plugin-identity-delegation
+vault secrets enable -path=identity-delegation vault-plugin-identity-delegation
 ```
 
 ## Usage
@@ -108,7 +108,7 @@ vault secrets enable -path=token-exchange vault-plugin-token-exchange
 ### Configure the Plugin
 
 ```bash
-vault write token-exchange/config \
+vault write identity-delegation/config \
     issuer="https://vault.example.com" \
     signing_key=@private_key.pem \
     default_ttl="24h"
@@ -117,7 +117,7 @@ vault write token-exchange/config \
 ### Create a Role
 
 ```bash
-vault write token-exchange/role/my-role \
+vault write identity-delegation/role/my-role \
     ttl="1h" \
     template='{"act": {"sub": "agent-123", "name": "My Agent"}}' \
     bound_issuer="https://idp.example.com" \
@@ -127,26 +127,26 @@ vault write token-exchange/role/my-role \
 ### Exchange a Token
 
 ```bash
-vault write token-exchange/token/my-role \
+vault write identity-delegation/token/my-role \
     subject_token="<JWT from IdP>"
 ```
 
 ### List Roles
 
 ```bash
-vault list token-exchange/role/
+vault list identity-delegation/role/
 ```
 
 ### Read a Role
 
 ```bash
-vault read token-exchange/role/my-role
+vault read identity-delegation/role/my-role
 ```
 
 ### Delete a Role
 
 ```bash
-vault delete token-exchange/role/my-role
+vault delete identity-delegation/role/my-role
 ```
 
 ## Development
@@ -172,7 +172,7 @@ Run `make help` to see all available targets:
 
 ```
 .
-├── cmd/vault-plugin-token-exchange/  # Main entry point
+├── cmd/vault-plugin-identity-delegation/  # Main entry point
 ├── scripts/                           # Helper scripts
 │   ├── demo.sh                       # Plugin demonstration
 │   ├── integration-test.sh           # Integration tests

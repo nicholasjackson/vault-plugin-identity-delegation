@@ -10,7 +10,7 @@ export VAULT_ADDR
 export VAULT_TOKEN
 
 echo "=========================================="
-echo "Vault Token Exchange Integration Test"
+echo "Vault Identity Delegation Integration Test"
 echo "=========================================="
 echo ""
 
@@ -33,7 +33,7 @@ if ! vault status > /dev/null 2>&1; then
     exit 1
 fi
 
-if ! vault secrets list | grep -q "token-exchange"; then
+if ! vault secrets list | grep -q "identity-delegation"; then
     echo "❌ Error: Plugin not enabled"
     echo "Please enable the plugin first: make register enable"
     exit 1
@@ -60,13 +60,13 @@ echo ""
 echo "Test 2: Configure plugin..."
 PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
 
-vault write token-exchange/config \
+vault write identity-delegation/config \
     issuer="https://vault.example.com" \
     signing_key="$PRIVATE_KEY" \
     default_ttl="1h" > /dev/null
 
 # Read config (should not show signing key)
-CONFIG_OUTPUT=$(vault read -format=json token-exchange/config)
+CONFIG_OUTPUT=$(vault read -format=json identity-delegation/config)
 if echo "$CONFIG_OUTPUT" | grep -q "signing_key"; then
     echo "❌ FAIL: Config read returned signing key (security issue)"
     exit 1
@@ -79,44 +79,44 @@ echo ""
 # Create roles
 echo "Test 3: Create and manage roles..."
 
-vault write token-exchange/role/test-role-1 \
+vault write identity-delegation/role/test-role-1 \
     ttl="1h" \
     template='{"act": {"sub": "agent-123"}}' > /dev/null
 
-vault write token-exchange/role/test-role-2 \
+vault write identity-delegation/role/test-role-2 \
     ttl="2h" \
     template='{"act": {"sub": "agent-456"}}' \
     bound_issuer="https://idp.example.com" \
     bound_audiences="service-a,service-b" > /dev/null
 
 # List roles
-ROLE_LIST=$(vault list -format=json token-exchange/role/)
+ROLE_LIST=$(vault list -format=json identity-delegation/role/)
 if ! echo "$ROLE_LIST" | grep -q "test-role-1"; then
     echo "❌ FAIL: Role listing failed"
     exit 1
 fi
 
 # Read role
-ROLE_DATA=$(vault read -format=json token-exchange/role/test-role-1)
+ROLE_DATA=$(vault read -format=json identity-delegation/role/test-role-1)
 if ! echo "$ROLE_DATA" | grep -q "agent-123"; then
     echo "❌ FAIL: Role read failed"
     exit 1
 fi
 
 # Update role
-vault write token-exchange/role/test-role-1 \
+vault write identity-delegation/role/test-role-1 \
     ttl="3h" \
     template='{"act": {"sub": "agent-123-updated"}}' > /dev/null
 
-UPDATED_ROLE=$(vault read -format=json token-exchange/role/test-role-1)
+UPDATED_ROLE=$(vault read -format=json identity-delegation/role/test-role-1)
 if ! echo "$UPDATED_ROLE" | grep -q "agent-123-updated"; then
     echo "❌ FAIL: Role update failed"
     exit 1
 fi
 
 # Delete role
-vault delete token-exchange/role/test-role-2 > /dev/null
-if vault read token-exchange/role/test-role-2 2>/dev/null; then
+vault delete identity-delegation/role/test-role-2 > /dev/null
+if vault read identity-delegation/role/test-role-2 2>/dev/null; then
     echo "❌ FAIL: Role deletion failed"
     exit 1
 fi
@@ -133,8 +133,8 @@ echo ""
 
 # Cleanup
 echo "Test 5: Cleanup..."
-vault delete token-exchange/role/test-role-1 > /dev/null
-vault delete token-exchange/config > /dev/null
+vault delete identity-delegation/role/test-role-1 > /dev/null
+vault delete identity-delegation/config > /dev/null
 
 echo "✓ Cleanup completed"
 echo ""

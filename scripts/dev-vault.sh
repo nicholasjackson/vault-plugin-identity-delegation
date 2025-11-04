@@ -5,7 +5,7 @@ set -e
 # Configuration
 VAULT_ADDR=${VAULT_ADDR:-http://127.0.0.1:8200}
 VAULT_TOKEN=${VAULT_TOKEN:-root}
-PLUGIN_NAME="vault-plugin-token-exchange"
+PLUGIN_NAME="vault-plugin-identity-delegation"
 PLUGIN_DIR="./bin"
 PLUGIN_PATH="$PLUGIN_DIR/$PLUGIN_NAME"
 
@@ -30,7 +30,7 @@ if [ ! -d "$PLUGIN_DIR" ]; then
     mkdir -p "$PLUGIN_DIR"
 fi
 
-go build -o "$PLUGIN_PATH" cmd/vault-plugin-token-exchange/main.go
+go build -o "$PLUGIN_PATH" cmd/vault-plugin-identity-delegation/main.go
 echo "✓ Plugin built: $PLUGIN_PATH"
 echo ""
 
@@ -77,9 +77,9 @@ echo "✓ Plugin registered"
 echo ""
 
 # Enable the plugin
-echo "Step 5: Enabling plugin at /token-exchange..."
+echo "Step 5: Enabling plugin at /identity-delegation..."
 vault secrets enable \
-    -path=token-exchange \
+    -path=identity-delegation \
     "$PLUGIN_NAME"
 echo "✓ Plugin enabled"
 echo ""
@@ -90,11 +90,11 @@ echo "=========================================="
 echo ""
 echo "Vault Address: $VAULT_ADDR"
 echo "Root Token: $VAULT_TOKEN"
-echo "Plugin Path: /token-exchange"
+echo "Plugin Path: /identity-delegation"
 echo ""
 echo "Quick Start:"
-echo "  vault write token-exchange/config issuer=... signing_key=@key.pem"
-echo "  vault write token-exchange/role/my-role ttl=1h template=..."
+echo "  vault write identity-delegation/config issuer=... signing_key=@key.pem"
+echo "  vault write identity-delegation/role/my-role ttl=1h template=..."
 echo ""
 echo "Run demo:"
 echo "  make demo"

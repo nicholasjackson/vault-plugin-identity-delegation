@@ -6,7 +6,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/sdk/plugin"
-	tokenexchange "github.com/nicholasjackson/vault-plugin-token-exchange"
+	identitydelegation "github.com/nicholasjackson/vault-plugin-identity-delegation"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	tlsProviderFunc := api.VaultPluginTLSProvider(tlsConfig)
 
 	err := plugin.ServeMultiplex(&plugin.ServeOpts{
-		BackendFactoryFunc: tokenexchange.Factory,
+		BackendFactoryFunc: identitydelegation.Factory,
 		TLSProviderFunc:    tlsProviderFunc,
 	})
 	if err != nil {

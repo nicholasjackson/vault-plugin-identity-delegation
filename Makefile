@@ -1,7 +1,7 @@
 .PHONY: build test lint clean dev-vault register enable demo help
 
 # Binary name
-BINARY=vault-plugin-token-exchange
+BINARY=vault-plugin-identity-delegation
 
 # Build directory
 BUILD_DIR=./bin
@@ -17,7 +17,7 @@ help: ## Display this help message
 build: ## Build the plugin binary
 	@echo "Building plugin..."
 	@mkdir -p $(BUILD_DIR)
-	@go build -o $(BUILD_DIR)/$(BINARY) cmd/vault-plugin-token-exchange/main.go
+	@go build -o $(BUILD_DIR)/$(BINARY) cmd/vault-plugin-identity-delegation/main.go
 	@echo "✓ Binary built: $(BUILD_DIR)/$(BINARY)"
 
 test: ## Run all tests
@@ -50,7 +50,7 @@ clean: ## Clean build artifacts and test data
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
 	@rm -f coverage.txt coverage.html
-	@rm -f vault-plugin-token-exchange
+	@rm -f vault-plugin-identity-delegation
 	@rm -rf ./data
 	@echo "✓ Cleaned"
 
@@ -86,15 +86,15 @@ enable: ## Enable plugin as secrets engine (requires registered plugin)
 	@export VAULT_ADDR=$(VAULT_ADDR); \
 	export VAULT_TOKEN=$(VAULT_TOKEN); \
 	vault secrets enable \
-		-path=token-exchange \
+		-path=identity-delegation \
 		$(BINARY)
-	@echo "✓ Plugin enabled at /token-exchange"
+	@echo "✓ Plugin enabled at /identity-delegation"
 
 disable: ## Disable plugin secrets engine
 	@echo "Disabling plugin..."
 	@export VAULT_ADDR=$(VAULT_ADDR); \
 	export VAULT_TOKEN=$(VAULT_TOKEN); \
-	vault secrets disable token-exchange
+	vault secrets disable identity-delegation
 	@echo "✓ Plugin disabled"
 
 reload: disable register enable ## Reload plugin (disable, register, enable)

@@ -1,4 +1,4 @@
-module github.com/nicholasjackson/vault-plugin-token-exchange
+module github.com/nicholasjackson/vault-plugin-identity-delegation
 
 go 1.25.0
 

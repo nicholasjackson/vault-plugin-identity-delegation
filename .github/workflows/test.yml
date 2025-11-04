@@ -85,16 +85,16 @@ jobs:
         run: go mod download
 
       - name: Build plugin
-        run: go build -o vault-plugin-token-exchange cmd/vault-plugin-token-exchange/main.go
+        run: go build -o vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
 
       - name: Verify binary
         run: |
-          ls -lh vault-plugin-token-exchange
-          file vault-plugin-token-exchange
-          ./vault-plugin-token-exchange --version || true
+          ls -lh vault-plugin-identity-delegation
+          file vault-plugin-identity-delegation
+          ./vault-plugin-identity-delegation --version || true
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vault-plugin-token-exchange
-          path: vault-plugin-token-exchange
+          name: vault-plugin-identity-delegation
+          path: vault-plugin-identity-delegation
