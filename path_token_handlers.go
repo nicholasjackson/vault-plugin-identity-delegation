@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
-	"gopkg.in/square/go-jose.v2"
-	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 // pathTokenExchange handles the token exchange request
@@ -53,7 +54,7 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Validate and parse subject token
-	claims, err := validateAndParseClaims(subjectTokenStr, &signingKey.PublicKey)
+	claims, err := validateAndParseClaims(subjectTokenStr, config.DelegateJWKSURI)
 	if err != nil {
 		return logical.ErrorResponse("failed to validate subject token: %v", err), nil
 	}
@@ -98,20 +99,49 @@ func parsePrivateKey(pemKey string) (*rsa.PrivateKey, error) {
 }
 
 // validateAndParseClaims validates the JWT signature and parses claims
-func validateAndParseClaims(tokenStr string, publicKey *rsa.PublicKey) (map[string]any, error) {
+func validateAndParseClaims(tokenStr string, jwksURI string) (map[string]any, error) {
+	// fetch JWKS
+	// TODO: Cache JWKS for performance
+	jwks, err := fetchJWKS(jwksURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
+	}
+
 	// Parse the JWT
-	parsedToken, err := jwt.ParseSigned(tokenStr)
+	parsedToken, err := jwt.ParseSigned(tokenStr, []jose.SignatureAlgorithm{jose.RS256})
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse JWT: %w", err)
 	}
 
+	// Find the key id from the token header
+	kid := parsedToken.Headers[0].KeyID
+	key := jwks.Key(kid)
+	if len(key) == 0 {
+		return nil, fmt.Errorf("key not found in JWKS")
+	}
+
 	// Verify signature and extract claims
 	claims := make(map[string]any)
-	if err := parsedToken.Claims(publicKey, &claims); err != nil {
+	if err := parsedToken.Claims(key[0], &claims); err != nil {
 		return nil, fmt.Errorf("failed to verify signature: %w", err)
 	}
 
 	return claims, nil
+}
+
+func fetchJWKS(url string) (*jose.JSONWebKeySet, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var jwks jose.JSONWebKeySet
+	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+		return nil, err
+	}
+
+	return &jwks, nil
 }
 
 // checkExpiration checks if the token is expired
@@ -223,7 +253,7 @@ func generateToken(config *Config, role *Role, originalClaims, templateClaims ma
 
 	// Build and sign token
 	builder := jwt.Signed(signer).Claims(claims)
-	token, err := builder.CompactSerialize()
+	token, err := builder.Serialize()
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize token: %w", err)
 	}

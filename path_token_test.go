@@ -5,14 +5,17 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/hashicorp/vault/sdk/logical"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/square/go-jose.v2"
-	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 // generateTestKeyPair generates a test RSA key pair for signing JWTs
@@ -29,18 +32,43 @@ func generateTestKeyPair(t *testing.T) (*rsa.PrivateKey, string) {
 }
 
 // generateTestJWT generates a test JWT signed with the given private key
-func generateTestJWT(t *testing.T, privateKey *rsa.PrivateKey, claims map[string]any) string {
+func generateTestJWT(t *testing.T, privateKey *rsa.PrivateKey, kid string, claims map[string]any) string {
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: privateKey},
-		(&jose.SignerOptions{}).WithType("JWT"),
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", kid),
 	)
 	require.NoError(t, err)
 
 	builder := jwt.Signed(signer).Claims(claims)
-	token, err := builder.CompactSerialize()
+	token, err := builder.Serialize()
 	require.NoError(t, err)
 
 	return token
+}
+
+// createMockJWKSServer creates a test HTTP server that serves a JWKS endpoint
+func createMockJWKSServer(t *testing.T, publicKey *rsa.PublicKey, kid string) *httptest.Server {
+	// Create JWK from public key
+	jwk := jose.JSONWebKey{
+		Key:       publicKey,
+		KeyID:     kid,
+		Algorithm: string(jose.RS256),
+		Use:       "sig",
+	}
+
+	// Create JWKS
+	jwks := jose.JSONWebKeySet{
+		Keys: []jose.JSONWebKey{jwk},
+	}
+
+	// Create test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		err := json.NewEncoder(w).Encode(jwks)
+		require.NoError(t, err)
+	}))
+
+	return server
 }
 
 // TestTokenExchange_Success tests successful token exchange
@@ -50,15 +78,21 @@ func TestTokenExchange_Success(t *testing.T) {
 	// Generate test key pair
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 
+	// Create mock JWKS server
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
 	// Configure plugin
 	configReq := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":      "https://vault.example.com",
-			"signing_key": privateKeyPEM,
-			"default_ttl": "1h",
+			"issuer":            "https://vault.example.com",
+			"delegate_jwks_uri": jwksServer.URL,
+			"signing_key":       privateKeyPEM,
+			"default_ttl":       "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -87,7 +121,7 @@ func TestTokenExchange_Success(t *testing.T) {
 		"exp":   time.Now().Add(1 * time.Hour).Unix(),
 		"iat":   time.Now().Unix(),
 	}
-	subjectToken := generateTestJWT(t, privateKey, subjectClaims)
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
 
 	// Exchange token
 	tokenReq := &logical.Request{
@@ -213,15 +247,21 @@ func TestTokenExchange_ExpiredToken(t *testing.T) {
 	// Generate test key pair
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 
+	// Create mock JWKS server
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
 	// Configure plugin
 	configReq := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":      "https://vault.example.com",
-			"signing_key": privateKeyPEM,
-			"default_ttl": "1h",
+			"issuer":            "https://vault.example.com",
+			"delegate_jwks_uri": jwksServer.URL,
+			"signing_key":       privateKeyPEM,
+			"default_ttl":       "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -249,7 +289,7 @@ func TestTokenExchange_ExpiredToken(t *testing.T) {
 		"exp": time.Now().Add(-1 * time.Hour).Unix(), // Expired 1 hour ago
 		"iat": time.Now().Add(-2 * time.Hour).Unix(),
 	}
-	expiredToken := generateTestJWT(t, privateKey, expiredClaims)
+	expiredToken := generateTestJWT(t, privateKey, testKID, expiredClaims)
 
 	// Exchange expired token
 	tokenReq := &logical.Request{
@@ -274,14 +314,21 @@ func TestTokenExchange_RoleNotFound(t *testing.T) {
 
 	// Configure plugin
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+
+	// Create mock JWKS server
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
 	configReq := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":      "https://vault.example.com",
-			"signing_key": privateKeyPEM,
-			"default_ttl": "1h",
+			"issuer":            "https://vault.example.com",
+			"delegate_jwks_uri": jwksServer.URL,
+			"signing_key":       privateKeyPEM,
+			"default_ttl":       "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -295,7 +342,7 @@ func TestTokenExchange_RoleNotFound(t *testing.T) {
 		"exp": time.Now().Add(1 * time.Hour).Unix(),
 		"iat": time.Now().Unix(),
 	}
-	subjectToken := generateTestJWT(t, privateKey, subjectClaims)
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
 
 	// Exchange token with non-existent role
 	tokenReq := &logical.Request{
@@ -321,15 +368,21 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 	// Generate test key pair
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 
+	// Create mock JWKS server
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
 	// Configure plugin
 	configReq := &logical.Request{
 		Operation: logical.UpdateOperation,
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":      "https://vault.example.com",
-			"signing_key": privateKeyPEM,
-			"default_ttl": "1h",
+			"issuer":            "https://vault.example.com",
+			"delegate_jwks_uri": jwksServer.URL,
+			"signing_key":       privateKeyPEM,
+			"default_ttl":       "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -358,7 +411,7 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 		"exp":   time.Now().Add(1 * time.Hour).Unix(),
 		"iat":   time.Now().Unix(),
 	}
-	subjectToken := generateTestJWT(t, privateKey, subjectClaims)
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
 
 	// Exchange token
 	tokenReq := &logical.Request{
@@ -377,7 +430,7 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 	require.NotEmpty(t, generatedToken)
 
 	// Parse and verify the token
-	parsedToken, err := jwt.ParseSigned(generatedToken)
+	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 	require.NoError(t, err, "Generated token should be valid JWT")
 
 	claims := make(map[string]any)
