@@ -90,12 +90,22 @@ func parsePrivateKey(pemKey string) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	switch block.Type {
+	case "RSA PRIVATE KEY":
+		privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
+		}
+		return privateKey, nil
+	case "PRIVATE KEY":
+		privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
+		}
+		return privateKey.(*rsa.PrivateKey), nil
+	default:
+		return nil, fmt.Errorf("unsupported signing key: %s", block.Type)
 	}
-
-	return privateKey, nil
 }
 
 // validateAndParseClaims validates the JWT signature and parses claims
