@@ -15,22 +15,31 @@ This plugin enables AI agents and services to exchange existing OIDC tokens for 
 
 - Go 1.23+
 - Vault CLI
-- Make (optional, but recommended)
+- OpenSSL
+- jq
 
-### Building
+### Easiest Way to Build and Test
+
+The quickest way to get started is to use the automated dev server and integration tests:
 
 ```bash
-# Using Make
-make build
+# Terminal 1: Start Vault dev server with plugin (builds, registers, and enables automatically)
+make dev-vault
 
-# Or manually
-go build -o bin/vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
+# Terminal 2: Run integration tests
+./scripts/integration-test.sh
 ```
 
-### Testing
+This will:
+1. Build the plugin
+2. Start Vault in dev mode
+3. Register and enable the plugin
+4. Run comprehensive integration tests including token exchange
+
+### Unit Tests
 
 ```bash
-# Run all tests
+# Run all unit tests
 make test
 
 # Run with coverage report
@@ -43,22 +52,9 @@ make lint
 make all
 ```
 
-### Local Development with Vault
+### Alternative Setup Options
 
-**Option 1: Automated Dev Server (Recommended - One Command!)**
-
-```bash
-# Starts Vault, builds plugin, registers, and enables it automatically
-make dev-vault
-
-# In another terminal, run demo
-make demo
-
-# Or run integration tests
-./scripts/integration-test.sh
-```
-
-**Option 2: Manual Registration**
+**Option 1: Manual Registration**
 
 ```bash
 # Terminal 1: Start Vault dev server
@@ -71,7 +67,7 @@ make register enable
 make demo
 ```
 
-**Option 3: Using Docker Compose**
+**Option 2: Using Docker Compose**
 
 ```bash
 # Build plugin
@@ -86,7 +82,7 @@ export VAULT_TOKEN=root
 make register enable
 ```
 
-**Option 4: Manual Setup**
+**Option 3: Manual Setup**
 
 ```bash
 # Build the plugin
