@@ -27,6 +27,11 @@ if ! command -v openssl > /dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v jq > /dev/null 2>&1; then
+    echo "❌ Error: JQ not found"
+    exit 1
+fi
+
 if ! vault status > /dev/null 2>&1; then
     echo "❌ Error: Cannot connect to Vault at $VAULT_ADDR"
     echo "Please start Vault dev server first: make dev-vault"
@@ -41,6 +46,82 @@ fi
 
 echo "✓ All prerequisites met"
 echo ""
+
+# Setup identity endpoing to generate valid JWTs with Vault
+echo "Setting up identity endpoint for JWT generation..."
+
+# Create the key
+vault write identity/oidc/key/user-key \
+    allowed_client_ids="*" \
+    verification_ttl=86400 \
+    rotation_period=86400 \
+    algorithm=RS256
+
+# Define the template for the JWT
+TEMPLATE='{
+  "username": {{identity.entity.aliases.<mount accessor>.name}},
+  "email": {{identity.entity.metadata.email}},
+  "role": {{identity.entity.metadata.role}},
+  "department": {{identity.entity.metadata.department}},
+  "manager": {{identity.entity.metadata.manager}},
+  "nbf": {{time.now}}
+}'
+
+# Create the role
+vault write identity/oidc/role/user \
+ key="user-key" \
+ template="$(echo ${TEMPLATE} | base64)" \
+ ttl=3600
+
+# Create an example entity and alias for the root user
+
+# Create custom policy for OIDC
+vault policy write oidc-policy - <<EOF
+path "identity/oidc/token/*" {
+  capabilities = ["read"]
+}
+path "identity/entity/*" {
+  capabilities = ["read", "list"]
+}
+EOF
+
+# Enable userpass
+vault auth enable userpass
+
+# Create a user
+vault write auth/userpass/users/admin \
+    password="your-password" \
+    policies="default,oidc-policy"
+
+# Get userpass mount accessor
+MOUNT_ACCESSOR=$(vault auth list -format=json | jq -r '.["userpass/"].accessor')
+
+# Create entity
+ENTITY_ID=$(
+  vault write \
+    -format=json identity/entity \
+    name="admin" \
+    metadata=email="admin@example.com" \
+    metadata=department="IT" \
+    metadata=role="administrator" \
+    metadata=manager="nic@email.com" \
+  | jq -r '.data.id')
+
+# Create alias
+vault write identity/entity-alias \
+    name="admin" \
+    canonical_id="${ENTITY_ID}" \
+    mount_accessor="${MOUNT_ACCESSOR}"
+
+# Login with userpass
+ADMIN_TOKEN=$(vault login -method=userpass -token-only username=admin password=your-password)
+
+# Now try OIDC token
+OIDC_TOKEN=$(VAULT_TOKEN=${ADMIN_TOKEN} vault read --format=json identity/oidc/token/user | jq -r '.data.token')
+echo "OIDC Token: $OIDC_TOKEN"
+echo ""
+
+echo "✓ Example entity and OIDC token setup complete"
 
 # Generate test keys
 echo "Test 1: Generate RSA key pair..."
