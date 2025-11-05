@@ -71,6 +71,19 @@ jobs:
   build:
     name: Build Plugin
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -85,16 +98,19 @@ jobs:
         run: go mod download
 
       - name: Build plugin
-        run: go build -o vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
-
-      - name: Verify binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          ls -lh vault-plugin-identity-delegation
-          file vault-plugin-identity-delegation
-          ./vault-plugin-identity-delegation --version || true
+          OUTPUT_NAME="vault-plugin-identity-delegation-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+          go build -o "${OUTPUT_NAME}" cmd/vault-plugin-identity-delegation/main.go
+          ls -lh "${OUTPUT_NAME}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vault-plugin-identity-delegation
-          path: vault-plugin-identity-delegation
+          name: vault-plugin-identity-delegation-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: vault-plugin-identity-delegation-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}

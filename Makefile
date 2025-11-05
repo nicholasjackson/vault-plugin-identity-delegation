@@ -1,10 +1,13 @@
-.PHONY: build test lint clean dev-vault register enable demo help
+.PHONY: build build-all test lint clean dev-vault register enable demo help
 
 # Binary name
 BINARY=vault-plugin-identity-delegation
 
 # Build directory
 BUILD_DIR=./bin
+
+# Build targets
+PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 # Vault dev server settings
 VAULT_ADDR?=http://127.0.0.1:8200
@@ -19,6 +22,30 @@ build: ## Build the plugin binary
 	@mkdir -p $(BUILD_DIR)
 	@go build -o $(BUILD_DIR)/$(BINARY) cmd/vault-plugin-identity-delegation/main.go
 	@echo "✓ Binary built: $(BUILD_DIR)/$(BINARY)"
+
+build-all: ## Build the plugin for all platforms
+	@echo "Building plugin for all platforms..."
+	@mkdir -p $(BUILD_DIR)
+	@for platform in $(PLATFORMS); do \
+		GOOS=$${platform%/*}; \
+		GOARCH=$${platform#*/}; \
+		OUTPUT_NAME=$(BUILD_DIR)/$(BINARY)-$$GOOS-$$GOARCH; \
+		if [ "$$GOOS" = "windows" ]; then \
+			OUTPUT_NAME=$$OUTPUT_NAME.exe; \
+		fi; \
+		echo "Building $$GOOS/$$GOARCH..."; \
+		GOOS=$$GOOS GOARCH=$$GOARCH go build -o $$OUTPUT_NAME cmd/vault-plugin-identity-delegation/main.go; \
+		if [ $$? -eq 0 ]; then \
+			echo "  ✓ Built: $$OUTPUT_NAME"; \
+		else \
+			echo "  ✗ Failed to build $$GOOS/$$GOARCH"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "✓ All binaries built successfully"
+	@echo ""
+	@echo "Built binaries:"
+	@ls -lh $(BUILD_DIR)/$(BINARY)-*
 
 test: ## Run all tests
 	@echo "Running tests..."
@@ -50,7 +77,7 @@ clean: ## Clean build artifacts and test data
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
 	@rm -f coverage.txt coverage.html
-	@rm -f vault-plugin-identity-delegation
+	@rm -f vault-plugin-identity-delegation vault-plugin-identity-delegation-*
 	@rm -rf ./data
 	@echo "✓ Cleaned"
 
