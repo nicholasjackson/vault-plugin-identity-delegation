@@ -72,7 +72,7 @@ func (b *Backend) pathRoleWrite(ctx context.Context, req *logical.Request, data 
 	if !ok {
 		return logical.ErrorResponse("actor_template is required"), nil
 	}
-	role.SubjectTemplate = atemplate.(string)
+	role.ActorTemplate = atemplate.(string)
 
 	// get the context (required)
 	contextVal, ok := data.GetOk("context")

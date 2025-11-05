@@ -1,7 +1,6 @@
 package tokenexchange
 
 import (
-	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
@@ -10,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -74,15 +74,15 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Process template to create additional claims
-
-	identity := map[string]map[string]any{
-		"entity": map[string]any{},
-	}
-
-	im := map[string]any{"identity": identity}
-
-	for k, v := range entity.Metadata {
-		identity["entity"][k] = v
+	im := map[string]any{
+		"identity": map[string]map[string]any{
+			"entity": {
+				"id":           entity.ID,
+				"name":         entity.Name,
+				"namespace_id": entity.NamespaceID,
+				"metadata":     entity.Metadata,
+			},
+		},
 	}
 
 	actorClaims, err := processTemplate(role.ActorTemplate, im)
@@ -90,10 +90,11 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 		return nil, fmt.Errorf("failed to process template: %w", err)
 	}
 
-	identity = map[string]map[string]any{
-		"subject": originalSubjectClaims,
+	sm := map[string]any{
+		"identity": map[string]map[string]any{
+			"subject": originalSubjectClaims,
+		},
 	}
-	sm := map[string]any{"identity": identity}
 
 	subjectClaims, err := processTemplate(role.SubjectTemplate, sm)
 	if err != nil {
@@ -101,7 +102,7 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Generate new token
-	newToken, err := generateToken(config, role, req.EntityID, actorClaims, subjectClaims, signingKey)
+	newToken, err := generateToken(config, role, req.EntityID, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -240,13 +241,16 @@ func fetchEntity(req *logical.Request, system logical.SystemView) (*logical.Enti
 
 // processTemplate processes the role template and returns additional claims
 func processTemplate(template string, claims map[string]any) (map[string]any, error) {
-	tmpl, _ := mustache.ParseString(template)
-	var buf bytes.Buffer
-	tmpl.Render(claims, &buf)
+	tmpl, err := mustache.ParseString(template)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	mo := tmpl.Render(claims)
 
 	// parse the string as json and return as a map
 	ret := map[string]any{}
-	err := json.Unmarshal(buf.Bytes(), &ret)
+	err = json.Unmarshal([]byte(mo), &ret)
 	if err != nil {
 		return nil, fmt.Errorf("unable to process template: %s", err)
 	}
@@ -255,7 +259,7 @@ func processTemplate(template string, claims map[string]any) (map[string]any, er
 }
 
 // generateToken generates a new JWT with the merged claims
-func generateToken(config *Config, role *Role, entityID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
+func generateToken(config *Config, role *Role, entityID string, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
 	// Create signer
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: signingKey},
@@ -293,8 +297,8 @@ func generateToken(config *Config, role *Role, entityID string, actorClaims, sub
 
 	// Add the on-behalf-of context
 	claims["obo"] = map[string]any{
-		"prn": subjectClaims["sub"],
-		"ctx": role.Context,
+		"prn": subjectID,
+		"ctx": strings.Join(role.Context, ","),
 	}
 
 	// Build and sign token

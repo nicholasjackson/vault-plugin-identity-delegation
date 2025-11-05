@@ -104,13 +104,18 @@ func TestTokenExchange_Success(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "agent-123"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"subject_template": `{"act": {"sub": "{{identity.subject.email}}"} }`,
+			"actor_template":   `{"act": {"sub": "{{identity.entity.id}}"} }`,
+			"context":          "urn:documents.service:read,urn:images.service:write",
 		},
 	}
-	_, err = b.HandleRequest(context.Background(), roleReq)
+	resp, err := b.HandleRequest(context.Background(), roleReq)
 	require.NoError(t, err)
+
+	respErr := resp.Error()
+	require.NoError(t, respErr)
 
 	// Generate subject token
 	subjectClaims := map[string]any{
@@ -131,8 +136,9 @@ func TestTokenExchange_Success(t *testing.T) {
 		Data: map[string]any{
 			"subject_token": subjectToken,
 		},
+		EntityID: "test_entity",
 	}
-	resp, err := b.HandleRequest(context.Background(), tokenReq)
+	resp, err = b.HandleRequest(context.Background(), tokenReq)
 
 	require.NoError(t, err, "Token exchange should succeed")
 	require.NotNil(t, resp, "Should return response")

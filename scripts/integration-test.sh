@@ -185,7 +185,7 @@ fi
 
 # Read role
 ROLE_DATA=$(vault read -format=json identity-delegation/role/test-role-1)
-if ! echo "$ROLE_DATA" | grep -q "agent-123"; then
+if ! echo "$ROLE_DATA" | grep -q "{{identity.entity.id}}"; then
     echo "❌ FAIL: Role read failed"
     exit 1
 fi

@@ -12,8 +12,18 @@ import (
 // getTestBackend creates a test backend for testing
 func getTestBackend(t *testing.T) (*Backend, logical.Storage) {
 	config := &logical.BackendConfig{
-		Logger:      hclog.NewNullLogger(),
-		System:      &logical.StaticSystemView{},
+		Logger: hclog.NewNullLogger(),
+		System: &logical.StaticSystemView{
+			EntityVal: &logical.Entity{
+				ID:   "test-entity",
+				Name: "test-entity-name",
+				Metadata: map[string]string{
+					"department": "engineering",
+					"team":       "platform",
+					"email":      "myemail@company.com",
+				},
+			},
+		},
 		StorageView: &logical.InmemStorage{},
 	}
 
