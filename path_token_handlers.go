@@ -56,7 +56,7 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Validate and parse subject token
-	originalSubjectClaims, err := validateAndParseClaims(subjectTokenStr, config.DelegateJWKSURI)
+	originalSubjectClaims, err := validateAndParseClaims(subjectTokenStr, config.SubjectJWKSURI)
 	if err != nil {
 		return logical.ErrorResponse("failed to validate subject token: %v", err), nil
 	}

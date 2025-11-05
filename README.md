@@ -4,9 +4,10 @@ A HashiCorp Vault secrets engine plugin that implements OAuth 2.0 Token Exchange
 
 ## Purpose
 
-This plugin enables AI agents and services to exchange existing OIDC tokens for new tokens that represent delegated authority. The resulting token contains:
-- Original user's identity and permissions
-- Agent/service identity for audit purposes
+This plugin enables AI agents and services to exchange existing OIDC tokens for new tokens that represent delegated authority. Following OAuth 2.0 Token Exchange (RFC 8693), the resulting token contains:
+- **Subject** - Original user's identity and permissions (the person authorizing the action)
+- **Actor** - Agent/service identity for audit purposes (the entity performing the action)
+- **Context** - Delegated scopes that restrict the token's permissions
 - "On behalf of" semantics per RFC 8693
 
 ## Quick Start
@@ -101,30 +102,106 @@ vault secrets enable -path=identity-delegation vault-plugin-identity-delegation
 
 ## Usage
 
+### Understanding Subject and Actor
+
+This plugin follows the [OAuth 2.0 Token Exchange (RFC 8693)](https://datatracker.ietf.org/doc/html/rfc8693) standard for "on behalf of" delegation:
+
+- **Subject** - The original user whose authority is being delegated (from `subject_token` parameter)
+- **Actor** - The agent/service acting on behalf of the subject (from Vault entity making the request)
+
+The exchanged token contains claims from both:
+1. **Subject Claims** - Identity and permissions from the user's original token
+2. **Actor Claims** - Identity information about the agent/service performing actions
+
+This creates a clear audit trail showing both who authorized the action (subject) and who performed it (actor).
+
 ### Configure the Plugin
 
 ```bash
 vault write identity-delegation/config \
     issuer="https://vault.example.com" \
     signing_key=@private_key.pem \
+    subject_jwks_uri="http://127.0.0.1:8200/v1/identity/oidc/.well-known/keys" \
     default_ttl="24h"
 ```
+
+Configuration fields:
+- `issuer` - The issuer claim for generated tokens
+- `signing_key` - RSA private key (PEM format) for signing tokens
+- `subject_jwks_uri` - JWKS endpoint for validating subject tokens
+- `default_ttl` - Default TTL for tokens if not specified in role
 
 ### Create a Role
 
 ```bash
 vault write identity-delegation/role/my-role \
     ttl="1h" \
-    template='{"act": {"sub": "agent-123", "name": "My Agent"}}' \
+    subject_claims_template='{"department": "{{.department}}", "role": "{{.role}}"}' \
+    actor_claims_template='{"act": {"sub": "agent-123", "name": "My Agent"}}' \
+    context="urn:documents:read,urn:images:write" \
     bound_issuer="https://idp.example.com" \
     bound_audiences="service-a,service-b"
 ```
+
+Role fields:
+- `ttl` - Token lifetime (required)
+- `subject_claims_template` - JSON template to extract/map claims from the user's subject token
+- `actor_claims_template` - JSON template to define claims about the agent/service (adds RFC 8693 `act` claim)
+- `context` - Comma-separated list of permitted scopes for the delegated token (RFC 8693 `ctx` claim)
+- `bound_issuer` - Required issuer for incoming subject tokens (optional)
+- `bound_audiences` - Comma-separated valid audiences for subject tokens (optional)
+
+#### Template Variables
+
+**Subject Claims Template** has access to claims from the user's token:
+- `{{.sub}}` - Subject from the user's token
+- `{{.email}}` - Email from the user's token
+- Any custom claims from the subject token
+
+**Actor Claims Template** can use static values or Vault entity metadata to describe the agent/service.
 
 ### Exchange a Token
 
 ```bash
 vault write identity-delegation/token/my-role \
     subject_token="<JWT from IdP>"
+```
+
+The response contains a new JWT with merged claims:
+
+```json
+{
+  "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+#### Example Token Structure
+
+Given:
+- Subject token with claims: `{"sub": "user123", "email": "user@example.com", "department": "engineering"}`
+- Actor template: `{"act": {"sub": "agent-123", "name": "My Agent"}}`
+- Subject template: `{"department": "{{.department}}"}`
+
+The exchanged token payload would be:
+
+```json
+{
+  "iss": "https://vault.example.com",
+  "sub": "user123",
+  "aud": "service-a",
+  "iat": 1699564800,
+  "exp": 1699568400,
+  "department": "engineering",
+  "act": {
+    "sub": "agent-123",
+    "name": "My Agent"
+  }
+}
+```
+
+**Debugging**: Use the JWT decoder script to inspect tokens:
+```bash
+./scripts/decode-jwt.py "$TOKEN"
 ```
 
 ### List Roles
@@ -172,6 +249,7 @@ Run `make help` to see all available targets:
 ├── scripts/                           # Helper scripts
 │   ├── demo.sh                       # Plugin demonstration
 │   ├── integration-test.sh           # Integration tests
+│   ├── decode-jwt.py                 # JWT decoder for debugging
 │   └── setup-test-env.sh            # Test environment setup
 ├── .github/workflows/                # GitHub Actions CI/CD
 ├── backend.go                        # Backend implementation

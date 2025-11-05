@@ -90,7 +90,7 @@ func TestTokenExchange_Success(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":            "https://vault.example.com",
-			"delegate_jwks_uri": jwksServer.URL,
+			"subject_jwks_uri": jwksServer.URL,
 			"signing_key":       privateKeyPEM,
 			"default_ttl":       "1h",
 		},
@@ -265,7 +265,7 @@ func TestTokenExchange_ExpiredToken(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":            "https://vault.example.com",
-			"delegate_jwks_uri": jwksServer.URL,
+			"subject_jwks_uri": jwksServer.URL,
 			"signing_key":       privateKeyPEM,
 			"default_ttl":       "1h",
 		},
@@ -332,7 +332,7 @@ func TestTokenExchange_RoleNotFound(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":            "https://vault.example.com",
-			"delegate_jwks_uri": jwksServer.URL,
+			"subject_jwks_uri": jwksServer.URL,
 			"signing_key":       privateKeyPEM,
 			"default_ttl":       "1h",
 		},
@@ -386,7 +386,7 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":            "https://vault.example.com",
-			"delegate_jwks_uri": jwksServer.URL,
+			"subject_jwks_uri": jwksServer.URL,
 			"signing_key":       privateKeyPEM,
 			"default_ttl":       "1h",
 		},
