@@ -89,10 +89,10 @@ func TestTokenExchange_Success(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":            "https://vault.example.com",
+			"issuer":           "https://vault.example.com",
 			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":       privateKeyPEM,
-			"default_ttl":       "1h",
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -268,10 +268,10 @@ func TestTokenExchange_ExpiredToken(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":            "https://vault.example.com",
+			"issuer":           "https://vault.example.com",
 			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":       privateKeyPEM,
-			"default_ttl":       "1h",
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -337,10 +337,10 @@ func TestTokenExchange_RoleNotFound(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":            "https://vault.example.com",
+			"issuer":           "https://vault.example.com",
 			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":       privateKeyPEM,
-			"default_ttl":       "1h",
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -391,10 +391,10 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":            "https://vault.example.com",
+			"issuer":           "https://vault.example.com",
 			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":       privateKeyPEM,
-			"default_ttl":       "1h",
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
