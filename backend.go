@@ -52,8 +52,8 @@ func NewBackend() *Backend {
 		// Define paths that should be encrypted in storage
 		PathsSpecial: &logical.Paths{
 			SealWrapStorage: []string{
-				"config",   // Config contains signing keys
-				"roles/*",  // Roles may contain sensitive templates
+				"config",  // Config contains signing keys
+				"roles/*", // Roles may contain sensitive templates
 			},
 		},
 
