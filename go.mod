@@ -1,6 +1,6 @@
 module github.com/nicholasjackson/vault-plugin-identity-delegation
 
-go 1.25.0
+go 1.25.3
 
 require (
 	github.com/go-jose/go-jose/v4 v4.0.5
