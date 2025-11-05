@@ -102,7 +102,7 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Generate new token
-	newToken, err := generateToken(config, role, req.EntityID, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey)
+	newToken, err := generateToken(config, role, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -259,7 +259,7 @@ func processTemplate(template string, claims map[string]any) (map[string]any, er
 }
 
 // generateToken generates a new JWT with the merged claims
-func generateToken(config *Config, role *Role, entityID string, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
+func generateToken(config *Config, role *Role, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
 	// Create signer
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: signingKey},
@@ -275,7 +275,7 @@ func generateToken(config *Config, role *Role, entityID string, subjectID string
 
 	// Standard claims
 	claims["iss"] = config.Issuer
-	claims["sub"] = entityID
+	claims["sub"] = subjectID // Subject from the original user token
 	claims["iat"] = now.Unix()
 	claims["exp"] = now.Add(role.TTL).Unix()
 

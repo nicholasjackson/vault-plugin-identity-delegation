@@ -17,11 +17,13 @@ func TestRoleWrite_Success(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":            "test-role",
-			"ttl":             "1h",
-			"template":        `{"act": {"sub": "{{.user.sub}}"}}`,
-			"bound_audiences": []string{"service-a", "service-b"},
-			"bound_issuer":    "https://idp.example.com",
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
+			"bound_audiences":  []string{"service-a", "service-b"},
+			"bound_issuer":     "https://idp.example.com",
 		},
 	}
 
@@ -45,8 +47,10 @@ func TestRoleWrite_MissingTTL(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"template": `{"act": {"sub": "{{.user.sub}}"}}`,
+			"name":             "test-role",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 			// Missing ttl
 		},
 	}
@@ -59,7 +63,7 @@ func TestRoleWrite_MissingTTL(t *testing.T) {
 	require.Contains(t, resp.Error().Error(), "ttl", "Error should mention missing ttl")
 }
 
-// TestRoleWrite_MissingTemplate tests validation of required template field
+// TestRoleWrite_MissingTemplate tests validation of required template fields
 func TestRoleWrite_MissingTemplate(t *testing.T) {
 	b, storage := getTestBackend(t)
 
@@ -68,9 +72,10 @@ func TestRoleWrite_MissingTemplate(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name": "test-role",
-			"ttl":  "1h",
-			// Missing template
+			"name":    "test-role",
+			"ttl":     "1h",
+			"context": []string{"urn:documents:read"},
+			// Missing actor_template and subject_template
 		},
 	}
 
@@ -79,6 +84,7 @@ func TestRoleWrite_MissingTemplate(t *testing.T) {
 	require.NoError(t, err, "Handler should not error")
 	require.NotNil(t, resp, "Should return error response")
 	require.True(t, resp.IsError(), "Response should be an error")
+	// Should mention missing template (either actor_template or subject_template)
 	require.Contains(t, resp.Error().Error(), "template", "Error should mention missing template")
 }
 
@@ -92,11 +98,13 @@ func TestRoleRead_Success(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":            "test-role",
-			"ttl":             "1h",
-			"template":        `{"act": {"sub": "{{.user.sub}}"}}`,
-			"bound_audiences": []string{"service-a", "service-b"},
-			"bound_issuer":    "https://idp.example.com",
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
+			"bound_audiences":  []string{"service-a", "service-b"},
+			"bound_issuer":     "https://idp.example.com",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), writeReq)
@@ -115,7 +123,9 @@ func TestRoleRead_Success(t *testing.T) {
 	require.NotNil(t, resp.Data, "Response should have data")
 	require.Equal(t, "test-role", resp.Data["name"])
 	require.Equal(t, "1h0m0s", resp.Data["ttl"])
-	require.Equal(t, `{"act": {"sub": "{{.user.sub}}"}}`, resp.Data["template"])
+	require.Equal(t, `{"act": {"sub": "agent-123"}}`, resp.Data["actor_template"])
+	require.Equal(t, `{"department": "{{.identity.subject.department}}"}`, resp.Data["subject_template"])
+	require.Equal(t, []string{"urn:documents:read"}, resp.Data["context"])
 	require.Equal(t, []string{"service-a", "service-b"}, resp.Data["bound_audiences"])
 	require.Equal(t, "https://idp.example.com", resp.Data["bound_issuer"])
 }
@@ -146,9 +156,11 @@ func TestRoleUpdate_Success(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "{{.user.sub}}"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), writeReq)
@@ -160,9 +172,11 @@ func TestRoleUpdate_Success(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "2h",
-			"template": `{"act": {"sub": "{{.user.sub}}", "email": "{{.user.email}}"}}`,
+			"name":             "test-role",
+			"ttl":              "2h",
+			"actor_template":   `{"act": {"sub": "agent-456", "name": "Updated Agent"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}", "role": "{{.identity.subject.role}}"}`,
+			"context":          []string{"urn:documents:read", "urn:documents:write"},
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), updateReq)
@@ -179,7 +193,9 @@ func TestRoleUpdate_Success(t *testing.T) {
 	resp, err = b.HandleRequest(context.Background(), readReq)
 	require.NoError(t, err)
 	require.Equal(t, "2h0m0s", resp.Data["ttl"])
-	require.Equal(t, `{"act": {"sub": "{{.user.sub}}", "email": "{{.user.email}}"}}`, resp.Data["template"])
+	require.Equal(t, `{"act": {"sub": "agent-456", "name": "Updated Agent"}}`, resp.Data["actor_template"])
+	require.Equal(t, `{"department": "{{.identity.subject.department}}", "role": "{{.identity.subject.role}}"}`, resp.Data["subject_template"])
+	require.Equal(t, []string{"urn:documents:read", "urn:documents:write"}, resp.Data["context"])
 }
 
 // TestRoleDelete_Success tests deleting a role
@@ -192,9 +208,11 @@ func TestRoleDelete_Success(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "{{.user.sub}}"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), writeReq)
@@ -229,9 +247,11 @@ func TestRoleList_Success(t *testing.T) {
 			Path:      "role/" + roleName,
 			Storage:   storage,
 			Data: map[string]any{
-				"name":     roleName,
-				"ttl":      "1h",
-				"template": `{"act": {"sub": "{{.user.sub}}"}}`,
+				"name":             roleName,
+				"ttl":              "1h",
+				"actor_template":   `{"act": {"sub": "agent-123"}}`,
+				"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+				"context":          []string{"urn:documents:read"},
 			},
 		}
 		_, err := b.HandleRequest(context.Background(), req)

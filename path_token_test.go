@@ -172,9 +172,11 @@ func TestTokenExchange_MissingSubjectToken(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "agent-123"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 		},
 	}
 	_, err = b.HandleRequest(context.Background(), roleReq)
@@ -222,9 +224,11 @@ func TestTokenExchange_InvalidJWT(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "agent-123"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 		},
 	}
 	_, err = b.HandleRequest(context.Background(), roleReq)
@@ -279,9 +283,11 @@ func TestTokenExchange_ExpiredToken(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "agent-123"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 		},
 	}
 	_, err = b.HandleRequest(context.Background(), roleReq)
@@ -400,9 +406,11 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 		Path:      "role/test-role",
 		Storage:   storage,
 		Data: map[string]any{
-			"name":     "test-role",
-			"ttl":      "1h",
-			"template": `{"act": {"sub": "agent-123"}}`,
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
+			"context":          []string{"urn:documents:read"},
 		},
 	}
 	_, err = b.HandleRequest(context.Background(), roleReq)
@@ -424,15 +432,21 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 		Operation: logical.UpdateOperation,
 		Path:      "token/test-role",
 		Storage:   storage,
+		EntityID:  "test_entity",
 		Data: map[string]any{
 			"subject_token": subjectToken,
 		},
 	}
 	resp, err := b.HandleRequest(context.Background(), tokenReq)
 	require.NoError(t, err)
+	require.NotNil(t, resp, "Response should not be nil")
+	if resp.IsError() {
+		t.Fatalf("Token exchange failed: %v", resp.Error())
+	}
 
 	// Verify the generated token
-	generatedToken := resp.Data["token"].(string)
+	generatedToken, ok := resp.Data["token"].(string)
+	require.True(t, ok, "Response should contain token as string")
 	require.NotEmpty(t, generatedToken)
 
 	// Parse and verify the token
