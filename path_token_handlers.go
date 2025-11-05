@@ -1,6 +1,7 @@
 package tokenexchange
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
@@ -15,6 +16,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
+	"github.com/hoisie/mustache"
 )
 
 // pathTokenExchange handles the token exchange request
@@ -72,17 +74,28 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Process template to create additional claims
-	metadata := map[string]any{}
-	for k, v := range entity.Metadata {
-		metadata[k] = v
+
+	identity := map[string]map[string]any{
+		"entity": map[string]any{},
 	}
 
-	actorClaims, err := processTemplate(role.ActorTemplate, metadata)
+	im := map[string]any{"identity": identity}
+
+	for k, v := range entity.Metadata {
+		identity["entity"][k] = v
+	}
+
+	actorClaims, err := processTemplate(role.ActorTemplate, im)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process template: %w", err)
 	}
 
-	subjectClaims, err := processTemplate(role.SubjectTemplate, originalSubjectClaims)
+	identity = map[string]map[string]any{
+		"subject": originalSubjectClaims,
+	}
+	sm := map[string]any{"identity": identity}
+
+	subjectClaims, err := processTemplate(role.SubjectTemplate, sm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process template: %w", err)
 	}
@@ -227,9 +240,18 @@ func fetchEntity(req *logical.Request, system logical.SystemView) (*logical.Enti
 
 // processTemplate processes the role template and returns additional claims
 func processTemplate(template string, claims map[string]any) (map[string]any, error) {
-	// TODO: Implement template processing logic
+	tmpl, _ := mustache.ParseString(template)
+	var buf bytes.Buffer
+	tmpl.Render(claims, &buf)
 
-	return map[string]any{"test": "123"}, nil
+	// parse the string as json and return as a map
+	ret := map[string]any{}
+	err := json.Unmarshal(buf.Bytes(), &ret)
+	if err != nil {
+		return nil, fmt.Errorf("unable to process template: %s", err)
+	}
+
+	return ret, nil
 }
 
 // generateToken generates a new JWT with the merged claims

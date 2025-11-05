@@ -165,13 +165,13 @@ echo "Test 3: Create and manage roles..."
 vault write identity-delegation/role/test-role-1 \
     ttl="1h" \
     context="urn:documents.service:read,urn:images.service:write" \
-    actor_template='{"act": {"sub": "agent-123"}}' \
-    subject_template='{"act": {"sub": "agent-123"}}' > /dev/null
+    actor_template='{"username": "{{identity.entity.id}}" }' \
+    subject_template='{"username": "{{identity.subject.username}}" }' > /dev/null
 
 vault write identity-delegation/role/test-role-2 \
     ttl="2h" \
-    actor_template='{"act": {"sub": "agent-456"}}' \
-    subject_template='{"act": {"sub": "agent-123"}}' \
+    actor_template='{"username": "{{identity.entity.id}}" }' \
+    subject_template='{"username": "{{identity.subject.username}}" }' \
     context="urn:documents.service:read,urn:images.service:write" \
     bound_issuer="https://idp.example.com" \
     bound_audiences="service-a,service-b" > /dev/null
