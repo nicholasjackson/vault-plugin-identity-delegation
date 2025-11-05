@@ -9,11 +9,13 @@ import (
 
 // Role represents a token exchange role configuration
 type Role struct {
-	Name           string        `json:"name"`
-	TTL            time.Duration `json:"ttl"`
-	Template       string        `json:"template"`
-	BoundAudiences []string      `json:"bound_audiences"`
-	BoundIssuer    string        `json:"bound_issuer"`
+	Name            string        `json:"name"`
+	TTL             time.Duration `json:"ttl"`
+	BoundAudiences  []string      `json:"bound_audiences"`
+	BoundIssuer     string        `json:"bound_issuer"`
+	ActorTemplate   string        `json:"actor_template"`
+	SubjectTemplate string        `json:"subject_template"`
+	Context         []string      `json:"context"`
 }
 
 const roleStoragePrefix = "roles/"
@@ -36,11 +38,6 @@ func pathRole(b *Backend) *framework.Path {
 				Description: "TTL for tokens generated with this role",
 				Required:    true,
 			},
-			"template": {
-				Type:        framework.TypeString,
-				Description: "JSON template for additional claims in the generated token",
-				Required:    true,
-			},
 			"bound_audiences": {
 				Type:        framework.TypeCommaStringSlice,
 				Description: "Comma-separated list of valid audiences for the subject token",
@@ -48,6 +45,21 @@ func pathRole(b *Backend) *framework.Path {
 			"bound_issuer": {
 				Type:        framework.TypeString,
 				Description: "Required issuer for the subject token",
+			},
+			"actor_template": {
+				Type:        framework.TypeString,
+				Description: "JSON template for additional claims in the generated token, claims are added to the main token claims",
+				Required:    true,
+			},
+			"subject_template": {
+				Type:        framework.TypeString,
+				Description: "JSON template for additional claims in the generated token, claims are added under 'subject_claims' key",
+				Required:    true,
+			},
+			"context": {
+				Type:        framework.TypeCommaStringSlice,
+				Description: "List of permitted delegate scopes to map to the on-behalf-of 'ctx' claim in the generated token, delegate scopes restrict the permissions of the generated token. i.e 'urn:documents.service:read,urn:images.service:write'",
+				Required:    true,
 			},
 		},
 

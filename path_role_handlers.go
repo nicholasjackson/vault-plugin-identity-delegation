@@ -35,11 +35,13 @@ func (b *Backend) pathRoleRead(ctx context.Context, req *logical.Request, data *
 
 	return &logical.Response{
 		Data: map[string]any{
-			"name":            role.Name,
-			"ttl":             role.TTL.String(),
-			"template":        role.Template,
-			"bound_audiences": role.BoundAudiences,
-			"bound_issuer":    role.BoundIssuer,
+			"name":             role.Name,
+			"ttl":              role.TTL.String(),
+			"bound_audiences":  role.BoundAudiences,
+			"bound_issuer":     role.BoundIssuer,
+			"actor_template":   role.ActorTemplate,
+			"subject_template": role.SubjectTemplate,
+			"context":          role.Context,
 		},
 	}, nil
 }
@@ -60,11 +62,24 @@ func (b *Backend) pathRoleWrite(ctx context.Context, req *logical.Request, data 
 	role.TTL = time.Duration(ttl.(int)) * time.Second
 
 	// Get template (required)
-	template, ok := data.GetOk("template")
+	stemplate, ok := data.GetOk("subject_template")
 	if !ok {
-		return logical.ErrorResponse("template is required"), nil
+		return logical.ErrorResponse("subject_template is required"), nil
 	}
-	role.Template = template.(string)
+	role.SubjectTemplate = stemplate.(string)
+
+	atemplate, ok := data.GetOk("actor_template")
+	if !ok {
+		return logical.ErrorResponse("actor_template is required"), nil
+	}
+	role.SubjectTemplate = atemplate.(string)
+
+	// get the context (required)
+	contextVal, ok := data.GetOk("context")
+	if !ok {
+		return logical.ErrorResponse("context is required"), nil
+	}
+	role.Context = contextVal.([]string)
 
 	// Get bound audiences (optional)
 	if audiences, ok := data.GetOk("bound_audiences"); ok {

@@ -75,13 +75,14 @@ vault write identity/oidc/role/user \
 
 # Create an example entity and alias for the root user
 
-# Create custom policy for OIDC
-vault policy write oidc-policy - <<EOF
-path "identity/oidc/token/*" {
-  capabilities = ["read"]
+# Create custom policy for Admin user
+vault policy write admin-policy - <<EOF
+path "identity-delegation/token/test-role-1" {
+  capabilities = ["create","update"]
 }
-path "identity/entity/*" {
-  capabilities = ["read", "list"]
+
+path "identity/oidc/token/user" {
+  capabilities = ["read"]
 }
 EOF
 
@@ -91,7 +92,7 @@ vault auth enable userpass
 # Create a user
 vault write auth/userpass/users/admin \
     password="your-password" \
-    policies="default,oidc-policy"
+    policies="default,admin-policy"
 
 # Get userpass mount accessor
 MOUNT_ACCESSOR=$(vault auth list -format=json | jq -r '.["userpass/"].accessor')
@@ -163,11 +164,15 @@ echo "Test 3: Create and manage roles..."
 
 vault write identity-delegation/role/test-role-1 \
     ttl="1h" \
-    template='{"act": {"sub": "agent-123"}}' > /dev/null
+    context="urn:documents.service:read,urn:images.service:write" \
+    actor_template='{"act": {"sub": "agent-123"}}' \
+    subject_template='{"act": {"sub": "agent-123"}}' > /dev/null
 
 vault write identity-delegation/role/test-role-2 \
     ttl="2h" \
-    template='{"act": {"sub": "agent-456"}}' \
+    actor_template='{"act": {"sub": "agent-456"}}' \
+    subject_template='{"act": {"sub": "agent-123"}}' \
+    context="urn:documents.service:read,urn:images.service:write" \
     bound_issuer="https://idp.example.com" \
     bound_audiences="service-a,service-b" > /dev/null
 
@@ -188,7 +193,9 @@ fi
 # Update role
 vault write identity-delegation/role/test-role-1 \
     ttl="3h" \
-    template='{"act": {"sub": "agent-123-updated"}}' > /dev/null
+    context="urn:documents.service:read,urn:images.service:write" \
+    actor_template='{"act": {"sub": "agent-123-updated"}}' \
+    subject_template='{"act": {"sub": "agent-123-updated"}}' > /dev/null
 
 UPDATED_ROLE=$(vault read -format=json identity-delegation/role/test-role-1)
 if ! echo "$UPDATED_ROLE" | grep -q "agent-123-updated"; then
@@ -212,8 +219,18 @@ echo "Note: Full token exchange testing requires properly signed JWTs."
 echo "The Go tests (go test) cover JWT validation and exchange logic."
 echo ""
 
-vault write identity-delegation/token/test-role-1 \
-    subject_token="$OIDC_TOKEN"
+DELEGATE_TOKEN=$(
+  VAULT_TOKEN=${ADMIN_TOKEN} vault write \
+    --format=json identity-delegation/token/test-role-1 \
+    subject_token="${OIDC_TOKEN}" \
+  | jq -r '.data.token'
+)
+
+echo "token: ${DELEGATE_TOKEN}"
+echo ""
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+${SCRIPT_DIR}/decode-jwt.py "${DELEGATE_TOKEN}"
 
 # Cleanup
 #echo "Test 5: Cleanup..."

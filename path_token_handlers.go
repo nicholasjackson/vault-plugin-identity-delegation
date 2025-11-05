@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -55,24 +54,41 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Validate and parse subject token
-	claims, err := validateAndParseClaims(subjectTokenStr, config.DelegateJWKSURI)
+	originalSubjectClaims, err := validateAndParseClaims(subjectTokenStr, config.DelegateJWKSURI)
 	if err != nil {
 		return logical.ErrorResponse("failed to validate subject token: %v", err), nil
 	}
 
 	// Check expiration
-	if err := checkExpiration(claims); err != nil {
+	if err := checkExpiration(originalSubjectClaims); err != nil {
 		return logical.ErrorResponse("subject token expired: %v", err), nil
 	}
 
+	// Fetch entity
+	b.Logger().Info("Get EntityID", "entity_id", req.EntityID)
+	entity, err := fetchEntity(req, b.System())
+	if err != nil {
+		return nil, err
+	}
+
 	// Process template to create additional claims
-	templateClaims, err := processTemplate(role.Template, claims)
+	metadata := map[string]any{}
+	for k, v := range entity.Metadata {
+		metadata[k] = v
+	}
+
+	actorClaims, err := processTemplate(role.ActorTemplate, metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process template: %w", err)
+	}
+
+	subjectClaims, err := processTemplate(role.SubjectTemplate, originalSubjectClaims)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process template: %w", err)
 	}
 
 	// Generate new token
-	newToken, err := generateToken(config, role, claims, templateClaims, signingKey)
+	newToken, err := generateToken(config, role, req.EntityID, actorClaims, subjectClaims, signingKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -194,51 +210,30 @@ func checkExpiration(claims map[string]any) error {
 	return nil
 }
 
-// processTemplate processes the role template and returns additional claims
-func processTemplate(template string, claims map[string]any) (map[string]any, error) {
-	// For scaffold: Simple JSON parsing and basic substitution
-	// In a full implementation, this would use a proper template engine
-
-	var templateClaims map[string]any
-	if err := json.Unmarshal([]byte(template), &templateClaims); err != nil {
-		return nil, fmt.Errorf("failed to parse template: %w", err)
+// fetchEntity retrieves the entity associated with the request
+func fetchEntity(req *logical.Request, system logical.SystemView) (*logical.Entity, error) {
+	entityID := req.EntityID
+	if entityID == "" {
+		return nil, fmt.Errorf("no entity ID in request")
 	}
 
-	// Process template substitutions (simple string replacement for scaffold)
-	processedClaims := processTemplateSubstitutions(templateClaims, claims)
+	entity, err := system.EntityInfo(entityID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get entity info: %w", err)
+	}
 
-	return processedClaims, nil
+	return entity, nil
 }
 
-// processTemplateSubstitutions performs simple template variable substitution
-func processTemplateSubstitutions(template, claims map[string]any) map[string]any {
-	result := make(map[string]any)
+// processTemplate processes the role template and returns additional claims
+func processTemplate(template string, claims map[string]any) (map[string]any, error) {
+	// TODO: Implement template processing logic
 
-	for key, value := range template {
-		switch v := value.(type) {
-		case string:
-			// Replace {{.claim.name}} with actual claim values
-			processed := v
-			for claimKey, claimValue := range claims {
-				placeholder := fmt.Sprintf("{{.user.%s}}", claimKey)
-				if strings.Contains(processed, placeholder) {
-					processed = strings.ReplaceAll(processed, placeholder, fmt.Sprintf("%v", claimValue))
-				}
-			}
-			result[key] = processed
-		case map[string]any:
-			// Recursively process nested maps
-			result[key] = processTemplateSubstitutions(v, claims)
-		default:
-			result[key] = value
-		}
-	}
-
-	return result
+	return map[string]any{"test": "123"}, nil
 }
 
 // generateToken generates a new JWT with the merged claims
-func generateToken(config *Config, role *Role, originalClaims, templateClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
+func generateToken(config *Config, role *Role, entityID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
 	// Create signer
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: signingKey},
@@ -254,21 +249,30 @@ func generateToken(config *Config, role *Role, originalClaims, templateClaims ma
 
 	// Standard claims
 	claims["iss"] = config.Issuer
-	claims["sub"] = originalClaims["sub"] // Subject from original token
+	claims["sub"] = entityID
 	claims["iat"] = now.Unix()
 	claims["exp"] = now.Add(role.TTL).Unix()
 
-	// Add audience if present in original token
-	if aud, ok := originalClaims["aud"]; ok {
+	// Add audience if present
+	if aud, ok := actorClaims["aud"]; ok {
 		claims["aud"] = aud
 	}
 
-	// Merge template claims
-	for key, value := range templateClaims {
+	// add the subject claims under "subject_claims" key
+	claims["subject_claims"] = subjectClaims
+
+	// Merge actor claims
+	for key, value := range actorClaims {
 		// Don't allow overriding reserved claims
 		if key != "iss" && key != "sub" && key != "iat" && key != "exp" && key != "aud" {
 			claims[key] = value
 		}
+	}
+
+	// Add the on-behalf-of context
+	claims["obo"] = map[string]any{
+		"prn": subjectClaims["sub"],
+		"ctx": role.Context,
 	}
 
 	// Build and sign token
