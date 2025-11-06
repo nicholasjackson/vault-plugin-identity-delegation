@@ -468,3 +468,565 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 	require.True(t, ok, "Should have act claim from template")
 	require.Equal(t, "agent-123", act["sub"], "Agent sub should match template")
 }
+
+// TestTokenExchange_BoundIssuerMismatch tests that tokens with wrong issuer are rejected
+func TestTokenExchange_BoundIssuerMismatch(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role with bound_issuer
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"bound_issuer":     "https://trusted-idp.example.com", // Required issuer
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token with DIFFERENT issuer
+	subjectClaims := map[string]any{
+		"sub": "user-123",
+		"iss": "https://untrusted-idp.example.com", // WRONG ISSUER
+		"aud": []string{"service-a"},
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Attempt token exchange
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test_entity",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+
+	require.NoError(t, err, "Handler should not panic")
+	require.NotNil(t, resp, "Should return error response")
+	require.True(t, resp.IsError(), "Response should be an error")
+	require.Contains(t, resp.Error().Error(), "issuer", "Error should mention issuer mismatch")
+}
+
+// TestTokenExchange_BoundIssuerMatch tests that tokens with correct issuer are accepted
+func TestTokenExchange_BoundIssuerMatch(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role with bound_issuer
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"bound_issuer":     "https://trusted-idp.example.com", // Required issuer
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token with MATCHING issuer
+	subjectClaims := map[string]any{
+		"sub": "user-123",
+		"iss": "https://trusted-idp.example.com", // CORRECT ISSUER
+		"aud": []string{"service-a"},
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Attempt token exchange
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test_entity",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+
+	require.NoError(t, err, "Handler should not error")
+	require.NotNil(t, resp, "Should return response")
+	require.False(t, resp.IsError(), "Response should not be an error")
+	require.Contains(t, resp.Data, "token", "Should return token")
+}
+
+// TestTokenExchange_BoundAudienceMismatch tests that tokens with wrong audience are rejected
+func TestTokenExchange_BoundAudienceMismatch(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role with bound_audiences
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"bound_audiences":  []string{"service-a", "service-b"}, // Allowed audiences
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token with DIFFERENT audience
+	subjectClaims := map[string]any{
+		"sub": "user-123",
+		"iss": "https://idp.example.com",
+		"aud": []string{"service-c"}, // WRONG AUDIENCE
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Attempt token exchange
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test_entity",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+
+	require.NoError(t, err, "Handler should not panic")
+	require.NotNil(t, resp, "Should return error response")
+	require.True(t, resp.IsError(), "Response should be an error")
+	require.Contains(t, resp.Error().Error(), "audience", "Error should mention audience mismatch")
+}
+
+// TestTokenExchange_BoundAudienceMatch tests that tokens with correct audience are accepted
+func TestTokenExchange_BoundAudienceMatch(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role with bound_audiences
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"bound_audiences":  []string{"service-a", "service-b"}, // Allowed audiences
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token with MATCHING audience (string format)
+	subjectClaims := map[string]any{
+		"sub": "user-123",
+		"iss": "https://idp.example.com",
+		"aud": "service-a", // CORRECT AUDIENCE (string)
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Attempt token exchange
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test_entity",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+
+	require.NoError(t, err, "Handler should not error")
+	require.NotNil(t, resp, "Should return response")
+	require.False(t, resp.IsError(), "Response should not be an error")
+	require.Contains(t, resp.Data, "token", "Should return token")
+}
+
+// TestTokenExchange_BoundAudienceMatchArray tests array audience format
+func TestTokenExchange_BoundAudienceMatchArray(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role with bound_audiences
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"bound_audiences":  []string{"service-a", "service-b"},
+			"actor_template":   `{"act": {"sub": "agent-123"}}`,
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token with MATCHING audience (array format)
+	subjectClaims := map[string]any{
+		"sub": "user-123",
+		"iss": "https://idp.example.com",
+		"aud": []string{"service-b", "other-service"}, // CORRECT AUDIENCE (array)
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Attempt token exchange
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test_entity",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+
+	require.NoError(t, err, "Handler should not error")
+	require.NotNil(t, resp, "Should return response")
+	require.False(t, resp.IsError(), "Response should not be an error")
+	require.Contains(t, resp.Data, "token", "Should return token")
+}
+
+// TestTokenExchange_ActClaimStructure tests that generated tokens have RFC 8693 compliant act claim
+func TestTokenExchange_ActClaimStructure(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"actor_template":   `{}`, // Empty template to use default
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read", "urn:images:write"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token
+	subjectClaims := map[string]any{
+		"sub":   "user-123",
+		"email": "user@example.com",
+		"iss":   "https://idp.example.com",
+		"aud":   []string{"service-a"},
+		"exp":   time.Now().Add(1 * time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Exchange token
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test-entity-456",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.False(t, resp.IsError())
+
+	// Parse generated token
+	generatedToken := resp.Data["token"].(string)
+	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
+	require.NoError(t, err)
+
+	claims := make(map[string]any)
+	err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+	require.NoError(t, err)
+
+	// Verify RFC 8693 compliant structure
+	// 1. Subject is the user (not the actor)
+	require.Equal(t, "user-123", claims["sub"], "Subject should be the user")
+
+	// 2. act claim exists with actor identity
+	act, ok := claims["act"].(map[string]any)
+	require.True(t, ok, "Should have act claim")
+
+	actSub, ok := act["sub"].(string)
+	require.True(t, ok, "act.sub should be a string")
+	require.NotEmpty(t, actSub, "act.sub should not be empty")
+	require.Contains(t, actSub, "test-entity-456", "act.sub should contain entity ID")
+
+	// 3. Optional: act.iss if present should be a string
+	if actIss, ok := act["iss"]; ok {
+		_, ok := actIss.(string)
+		require.True(t, ok, "act.iss should be a string if present")
+	}
+
+	// 4. act claim should NOT contain non-identity claims
+	_, hasExp := act["exp"]
+	require.False(t, hasExp, "act should not contain exp claim")
+
+	_, hasAud := act["aud"]
+	require.False(t, hasAud, "act should not contain aud claim")
+
+	_, hasIat := act["iat"]
+	require.False(t, hasIat, "act should not contain iat claim")
+
+	// 5. Scope claim should be space-delimited string
+	scope, ok := claims["scope"].(string)
+	require.True(t, ok, "scope should be a string")
+	require.Contains(t, scope, " ", "scope should be space-delimited")
+	require.Equal(t, "urn:documents:read urn:images:write", scope, "scope should be space-delimited")
+
+	// 6. obo claim should NOT exist (deprecated)
+	_, hasObo := claims["obo"]
+	require.False(t, hasObo, "obo claim should not exist (replaced by act)")
+}
+
+// TestTokenExchange_ActorMetadataOptional tests that actor metadata is stored separately from act claim
+func TestTokenExchange_ActorMetadataOptional(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Generate test key pair and JWKS server
+	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	testKID := "test-key-1"
+	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
+	defer jwksServer.Close()
+
+	// Configure plugin
+	configReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data: map[string]any{
+			"issuer":           "https://vault.example.com",
+			"subject_jwks_uri": jwksServer.URL,
+			"signing_key":      privateKeyPEM,
+			"default_ttl":      "1h",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), configReq)
+	require.NoError(t, err)
+
+	// Create role with actor metadata in template
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name": "test-role",
+			"ttl":  "1h",
+			"actor_template": `{
+				"actor_metadata": {
+					"entity_id": "{{identity.entity.id}}",
+					"entity_name": "{{identity.entity.name}}",
+					"department": "AI Services"
+				}
+			}`,
+			"subject_template": `{"department": "IT"}`,
+			"context":          []string{"urn:documents:read"},
+		},
+	}
+	_, err = b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+
+	// Generate subject token
+	subjectClaims := map[string]any{
+		"sub": "user-123",
+		"iss": "https://idp.example.com",
+		"aud": []string{"service-a"},
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	subjectToken := generateTestJWT(t, privateKey, testKID, subjectClaims)
+
+	// Exchange token
+	tokenReq := &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "token/test-role",
+		Storage:   storage,
+		EntityID:  "test-entity-456",
+		Data: map[string]any{
+			"subject_token": subjectToken,
+		},
+	}
+	resp, err := b.HandleRequest(context.Background(), tokenReq)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.False(t, resp.IsError())
+
+	// Parse generated token
+	generatedToken := resp.Data["token"].(string)
+	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
+	require.NoError(t, err)
+
+	claims := make(map[string]any)
+	err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+	require.NoError(t, err)
+
+	// Verify act claim contains ONLY identity
+	act, ok := claims["act"].(map[string]any)
+	require.True(t, ok, "Should have act claim")
+	require.Contains(t, act, "sub", "act should have sub")
+	require.NotContains(t, act, "entity_id", "act should not contain metadata")
+	require.NotContains(t, act, "department", "act should not contain metadata")
+
+	// Verify actor metadata is in separate namespace
+	actorMetadata, ok := claims["actor_metadata"].(map[string]any)
+	require.True(t, ok, "Should have actor_metadata namespace")
+	require.Contains(t, actorMetadata, "entity_id", "actor_metadata should contain entity_id")
+	require.Contains(t, actorMetadata, "department", "actor_metadata should contain department")
+	require.Equal(t, "AI Services", actorMetadata["department"], "actor_metadata should have correct values")
+}

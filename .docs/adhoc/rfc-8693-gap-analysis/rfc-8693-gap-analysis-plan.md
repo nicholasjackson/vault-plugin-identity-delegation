@@ -1,185 +1,51 @@
 # RFC 8693 Compliance Gap Analysis
 
 **Created**: 2025-11-05
+**Updated**: 2025-11-05
 **Type**: Analysis Report
 **Status**: Complete
 
 ---
 
+## Scope Clarification
+
+**IMPORTANT**: This analysis focuses on **TOKEN FORMAT compliance with RFC 8693**, not full API compliance.
+
+### In Scope: Token Format
+- ✅ Token claims structure (`act` claim)
+- ✅ Token semantics (delegation model)
+- ✅ Token type identifiers
+- ✅ Claim validation
+
+### Out of Scope: HTTP API
+- ❌ Request parameter format (grant_type, subject_token_type, etc.)
+- ❌ Response format (access_token vs token)
+- ❌ HTTP error codes
+- ❌ Token exchange protocol endpoints
+
+**Goal**: Issue RFC 8693 compliant tokens that can be validated by standard resource servers, while maintaining Vault's existing HTTP API patterns.
+
+---
+
 ## Overview
 
-This document provides a comprehensive analysis of the current Vault Token Exchange plugin implementation against the OAuth 2.0 Token Exchange specification (RFC 8693). It identifies gaps between the current implementation and the RFC requirements, and provides detailed comparisons of delegation patterns.
+This document provides a comprehensive analysis of the current Vault Token Exchange plugin's token format against RFC 8693 (OAuth 2.0 Token Exchange) specification. It identifies gaps in token structure and provides detailed comparisons of delegation patterns.
 
 ## Executive Summary
 
-The current plugin implements a custom token exchange mechanism for "on behalf of" scenarios but **deviates significantly from RFC 8693** in the following critical areas:
+The current plugin implements a custom token exchange mechanism for "on behalf of" scenarios but **uses non-standard token format** in the following areas:
 
-1. **Non-compliant request/response format** - Missing required parameters and response fields
-2. **Custom claim structure** - Uses `obo` claim instead of standard `act` claim
-3. **Missing token type handling** - No URN-based token type identifiers
-4. **Incomplete validation** - Bound audience/issuer checks not implemented
-5. **Non-standard error responses** - Missing RFC-specified error codes
+1. **Custom claim structure** - Uses `obo` claim (expired 2010 draft) instead of standard `act` claim (RFC 8693)
+2. **Semantic inversion** - Token structure emphasizes actor over user (opposite of RFC 8693 delegation model)
+3. **Incomplete validation** - Bound audience/issuer checks not implemented
 
-**Compliance Level**: ~30% RFC-compliant (basic token exchange concept only)
+**Token Format Compliance Level**: ~40% RFC-compliant (correct subject, but wrong delegation structure)
 
-## Critical Gaps (MUST Requirements from RFC 8693)
+**Note**: HTTP API compliance (request/response format) is OUT OF SCOPE for this analysis.
 
-### 1. Missing Grant Type Parameter (RFC 8693 Section 2.1)
+## Token Format Gaps (In Scope)
 
-**Current State**: The plugin uses a simple `/token/:name` endpoint with only `subject_token` parameter
-**Location**: `path_token.go:13-24`
-
-**RFC Requirement**: MUST accept `grant_type` parameter with value `urn:ietf:params:oauth:grant-type:token-exchange`
-
-**Current Request Schema**:
-```go
-Fields: map[string]*framework.FieldSchema{
-    "name": {
-        Type:        framework.TypeString,
-        Description: "Name of the role to use for token exchange",
-        Required:    true,
-    },
-    "subject_token": {
-        Type:        framework.TypeString,
-        Description: "The subject token (JWT) to exchange",
-        Required:    true,
-    },
-}
-```
-
-**RFC-Compliant Request Should Include**:
-```http
-POST /token/:name
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=urn:ietf:params:oauth:grant-type:token-exchange
-&subject_token=eyJhbGc...
-&subject_token_type=urn:ietf:params:oauth:token-type:jwt
-```
-
-**Impact**: Non-compliant clients expecting standard OAuth 2.0 token exchange will fail
-
----
-
-### 2. Missing subject_token_type Parameter (RFC 8693 Section 2.1)
-
-**Current State**: Plugin assumes JWT but doesn't require token type specification
-**Location**: `path_token.go:19-23`
-
-**RFC Requirement**: MUST include `subject_token_type` parameter to identify token format
-**Expected value**: `urn:ietf:params:oauth:token-type:jwt`
-
-**Why This Matters**:
-- Enables support for multiple token formats (JWT, SAML, etc.)
-- Provides explicit contract about token format
-- Required for RFC compliance
-
-**Impact**: Cannot support multiple token types; implicit assumptions about format
-
----
-
-### 3. Missing actor_token and actor_token_type Parameters (RFC 8693 Section 2.1)
-
-**Current State**: Plugin uses Vault entity information to generate actor claims
-**Location**: `path_token_handlers.go:69-102`
-
-**Current Implementation**:
-```go
-// Fetch entity
-entity, err := fetchEntity(req, b.System())
-if err != nil {
-    return nil, err
-}
-
-// Process template to create additional claims
-im := map[string]any{
-    "identity": map[string]map[string]any{
-        "entity": {
-            "id":           entity.ID,
-            "name":         entity.Name,
-            "namespace_id": entity.NamespaceID,
-            "metadata":     entity.Metadata,
-        },
-    },
-}
-
-actorClaims, err := processTemplate(role.ActorTemplate, im)
-```
-
-**RFC Requirement**: SHOULD support optional `actor_token` parameter for explicit actor identity
-**RFC Requirement**: MUST include `actor_token_type` when `actor_token` is present
-
-**RFC-Compliant Request**:
-```http
-POST /token
-grant_type=urn:ietf:params:oauth:grant-type:token-exchange
-&subject_token=eyJhbGc...user-jwt
-&subject_token_type=urn:ietf:params:oauth:token-type:jwt
-&actor_token=eyJhbGc...agent-jwt
-&actor_token_type=urn:ietf:params:oauth:token-type:jwt
-```
-
-**Impact**: Current implementation conflates authentication (Vault entity) with actor token semantics; cannot accept explicit actor tokens from external sources
-
----
-
-### 4. Non-Compliant Response Format (RFC 8693 Section 2.2)
-
-**Current State**: Returns `{"token": "..."}` at `path_token_handlers.go:110-114`
-
-**Current Response**:
-```go
-return &logical.Response{
-    Data: map[string]any{
-        "token": newToken,
-    },
-}, nil
-```
-
-**RFC Requirement**: MUST return:
-- `access_token` (REQUIRED) - not "token"
-- `issued_token_type` (REQUIRED) - missing entirely
-- `token_type` (REQUIRED) - missing entirely (should be "Bearer" or "N_A")
-- `expires_in` (RECOMMENDED) - missing entirely
-- `scope` (OPTIONAL) - missing
-
-**RFC-Compliant Response**:
-```json
-{
-  "access_token": "eyJhbGc...",
-  "issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-  "token_type": "N_A",
-  "expires_in": 3600,
-  "scope": "read write"
-}
-```
-
-**Impact**: Non-compliant clients cannot parse response; missing critical metadata about issued token
-
----
-
-### 5. Missing Token Type Identifiers (RFC 8693 Section 3)
-
-**Current State**: No token type validation or specification
-**Location**: Throughout `path_token_handlers.go`
-
-**RFC Requirement**: MUST use URN identifiers for token types:
-- Input: `urn:ietf:params:oauth:token-type:jwt`
-- Output: `urn:ietf:params:oauth:token-type:access_token` or `urn:ietf:params:oauth:token-type:jwt`
-
-**Standard Token Type URNs**:
-- `urn:ietf:params:oauth:token-type:access_token` - OAuth 2.0 access token
-- `urn:ietf:params:oauth:token-type:refresh_token` - OAuth 2.0 refresh token
-- `urn:ietf:params:oauth:token-type:id_token` - OpenID Connect ID Token
-- `urn:ietf:params:oauth:token-type:saml1` - SAML 1.1 assertion
-- `urn:ietf:params:oauth:token-type:saml2` - SAML 2.0 assertion
-- `urn:ietf:params:oauth:token-type:jwt` - JSON Web Token
-
-**Impact**: Cannot validate token types; no extensibility for other token formats
-
----
-
-### 6. Non-Standard Actor Claim Structure (RFC 8693 Section 4.1)
+### Gap 1: Non-Standard Actor Claim Structure (RFC 8693 Section 4.1) 🔴 CRITICAL
 
 **Current State**: Uses custom `obo` claim structure at `path_token_handlers.go:298-302`
 
@@ -234,117 +100,132 @@ claims["obo"] = map[string]any{
 }
 ```
 
-**Impact**: Non-standard claim structure; resource servers expecting RFC 8693 format cannot process tokens correctly
+**Impact**: 🔴 **CRITICAL** - Resource servers expecting RFC 8693 format cannot process tokens correctly
+
+**Priority**: HIGH - Core token format issue
 
 ---
 
-## Important Gaps (SHOULD/RECOMMENDED Requirements)
+### Gap 2: Token Structure Organization - User vs Actor Claim Prominence
 
-### 7. Missing resource and audience Parameters (RFC 8693 Section 2.1)
+**Current State**: Token structure emphasizes actor metadata at top-level, with user metadata nested
+**Location**: `path_token_handlers.go:288-302`
 
-**Current State**: Audience is extracted from actor claims template
-**Location**: `path_token_handlers.go:283-285`
-
-```go
-// Add audience if present
-if aud, ok := actorClaims["aud"]; ok {
-    claims["aud"] = aud
-}
-```
-
-**RFC Requirement**: SHOULD support `resource` and `audience` parameters to specify target services
-
-**RFC-Compliant Request**:
-```http
-POST /token
-grant_type=urn:ietf:params:oauth:grant-type:token-exchange
-&subject_token=eyJhbGc...
-&subject_token_type=urn:ietf:params:oauth:token-type:jwt
-&resource=https://backend.example.com/api
-&audience=backend-service
-```
-
-**Impact**: Cannot explicitly declare which service the token is intended for; relies on template configuration
-
----
-
-### 8. Missing scope Parameter (RFC 8693 Section 2.1)
-
-**Current State**: Uses `context` array in role config, hardcoded in response
-**Location**: `path_role.go:59-63`, `path_token_handlers.go:301`
-
-**Current Role Configuration**:
-```go
-"context": {
-    Type:        framework.TypeCommaStringSlice,
-    Description: "List of permitted delegate scopes to map to the on-behalf-of 'ctx' claim...",
-    Required:    true,
-}
-```
-
-**RFC Requirement**: SHOULD accept `scope` parameter to request specific permissions
-
-**RFC-Compliant Request**:
-```http
-POST /token
-grant_type=urn:ietf:params:oauth:grant-type:token-exchange
-&subject_token=eyJhbGc...
-&subject_token_type=urn:ietf:params:oauth:token-type:jwt
-&scope=read write
-```
-
-**Impact**: Client cannot dynamically request scopes; all scopes are pre-configured in role
-
----
-
-### 9. Missing requested_token_type Parameter (RFC 8693 Section 2.1)
-
-**Current State**: Always returns JWT
-**Location**: `path_token_handlers.go:262-312`
-
-**RFC Requirement**: SHOULD support `requested_token_type` to allow clients to request specific token formats
-
-**Impact**: Cannot support scenarios where different token formats are needed
-
----
-
-### 10. Missing Error Codes (RFC 8693 Section 2.2.2)
-
-**Current State**: Generic error responses
-**Location**: `path_token_handlers.go:30,40,49,61,66`
-
-**Current Error Handling**:
-```go
-if !ok {
-    return logical.ErrorResponse("subject_token is required"), nil
-}
-
-if role == nil {
-    return logical.ErrorResponse("role %q not found", roleName), nil
-}
-
-if config == nil {
-    return logical.ErrorResponse("plugin not configured"), nil
-}
-```
-
-**RFC Requirement**:
-- MUST use `invalid_request` for invalid tokens or missing required parameters
-- SHOULD use `invalid_target` for resource/audience issues
-
-**RFC-Compliant Error Response**:
+**Current Token Structure**:
 ```json
 {
-  "error": "invalid_request",
-  "error_description": "subject_token parameter is required"
+  "sub": "user@example.com",              // Subject correct
+
+  // Actor metadata PROMINENT (top level)
+  "entity_id": "vault-entity-123",
+  "department": "AI Services",
+  "agent_type": "gpt-4",
+
+  // User metadata SUBORDINATE (nested)
+  "subject_claims": {
+    "email": "user@example.com",
+    "name": "John Doe"
+  }
 }
 ```
 
-**Impact**: Non-standard error handling; clients cannot parse errors according to OAuth 2.0 specification
+**RFC 8693 Compliant Structure Options**:
+
+**Option A: User-Centric (More Standard)**
+```json
+{
+  "sub": "user@example.com",              // User is primary subject
+  "act": {"sub": "agent@example.com"},    // Actor delegation
+
+  // User metadata PROMINENT (top level)
+  "email": "user@example.com",
+  "name": "John Doe",
+  "roles": ["user", "premium"],
+
+  // Actor metadata NAMESPACED
+  "actor_metadata": {
+    "entity_id": "vault-entity-123",
+    "department": "AI Services",
+    "agent_type": "gpt-4"
+  }
+}
+```
+
+**Option B: Dual Namespaced (Clearest)**
+```json
+{
+  "sub": "user@example.com",              // User is primary subject
+  "act": {"sub": "agent@example.com"},    // Actor delegation
+  "scope": "read write",                  // Delegated scopes
+
+  // User metadata NAMESPACED
+  "subject_claims": {
+    "email": "user@example.com",
+    "name": "John Doe",
+    "roles": ["user", "premium"]
+  },
+
+  // Actor metadata NAMESPACED
+  "actor_metadata": {
+    "entity_id": "vault-entity-123",
+    "department": "AI Services",
+    "agent_type": "gpt-4"
+  }
+}
+```
+
+**Design Decision Required**: Choose between:
+- **Option A**: User claims prominent (more standard, follows typical JWT patterns)
+- **Option B**: Both namespaced (clearest provenance, symmetric structure)
+
+**Why This Matters**: RFC 8693 delegation semantics are user-centric ("user authority wielded by agent"), not agent-centric ("agent acting with user reference")
+
+**Note**: Actor metadata storage is a **design extension beyond RFC 8693** (see Design Decisions section). RFC only mandates actor identity in `act.sub`.
+
+**Impact**: Affects token interpretation and resource server expectations
+
+**Priority**: MEDIUM - Structural organization, both options are RFC-compliant
 
 ---
 
-### 11. Missing Bound Audience/Issuer Validation
+### Gap 3: Historical OBO Claim Origin
+
+**Discovery**: The `obo` claim comes from an **expired 2010 Internet Draft** that was never standardized.
+
+**History**:
+- **2010**: `draft-jones-on-behalf-of-jwt-00` proposed `obo` claim (Microsoft authors)
+- **2011**: Draft expired April 29, 2011 - never adopted
+- **2020**: RFC 8693 published with `act` claim instead (different structure)
+
+**Current `obo` Structure** (from expired draft):
+```json
+{
+  "obo": {
+    "prn": "user@example.com",    // Principal
+    "ctx": ["read", "write"]      // Context (array)
+  }
+}
+```
+
+**RFC 8693 `act` Structure** (official standard):
+```json
+{
+  "act": {
+    "sub": "agent@example.com"    // Actor identity only
+  },
+  "scope": "read write"           // Scopes at top level (space-delimited)
+}
+```
+
+**Why This Matters**: Using an expired, non-standard draft instead of published RFC
+
+**Impact**: No standard tooling/libraries recognize `obo`; not interoperable
+
+**Priority**: HIGH - Using non-standard specification
+
+---
+
+### Gap 4: Missing Bound Audience/Issuer Validation 🔴 SECURITY RISK
 
 **Current State**: Role has `BoundAudiences` and `BoundIssuer` fields defined but **not validated**
 **Location**:
@@ -386,11 +267,13 @@ if len(role.BoundAudiences) > 0 {
 }
 ```
 
-**Impact**: Security risk - tokens with wrong issuer or audience can be exchanged
+**Impact**: 🔴 **SECURITY RISK** - Tokens with wrong issuer or audience can be exchanged; violates principle of least privilege
+
+**Priority**: CRITICAL - Security vulnerability
 
 ---
 
-### 12. Missing scope Claim in Output Token (RFC 8693 Section 4.3)
+### Gap 5: Missing scope Claim in Output Token (RFC 8693 Section 4.3)
 
 **Current State**: Scopes stored in custom `obo.ctx` field as comma-delimited string
 **Location**: `path_token_handlers.go:299-302`
@@ -411,29 +294,96 @@ claims["scope"] = strings.Join(role.Context, " ")  // Space-delimited
 
 **Impact**: Scope information not in standard location; non-compliant with JWT best practices
 
----
-
-## Additional Observations
-
-### 13. Non-Standard Endpoint Pattern
-
-**Current**: `/token/:name` (role-based routing)
-**RFC 8693**: Typically uses a single token endpoint (e.g., `/token`) with role specified via parameters or client authentication
-
-**Note**: This may be acceptable given Vault's path-based routing model, but differs from typical OAuth 2.0 implementations
+**Priority**: MEDIUM - Affects scope representation
 
 ---
 
-### 14. Missing Client Authentication
+## HTTP API Gaps (Out of Scope)
 
-**Current**: Relies on Vault token authentication
-**RFC 8693**: Recommends OAuth 2.0 client authentication methods
+The following gaps relate to the HTTP API protocol, not token format. These are **OUT OF SCOPE** for this analysis as the goal is token format compliance only.
 
-**Note**: This may be acceptable given Vault's authentication model, but should be documented
+### ❌ OUT OF SCOPE: Missing Grant Type Parameter (RFC 8693 Section 2.1)
+
+**Reason**: HTTP API compliance not required - only token format compliance
+
+**Note**: Vault plugins use their own path-based routing. Client integration handles the Vault-specific API.
 
 ---
 
-### 15. Custom Subject Claims Structure
+### ❌ OUT OF SCOPE: Missing subject_token_type Parameter
+
+**Reason**: HTTP API parameter - not part of token format
+
+---
+
+### ❌ OUT OF SCOPE: Missing actor_token Parameter
+
+**Reason**: HTTP API parameter - plugin uses Vault entity for actor identity (valid design choice)
+
+---
+
+### ❌ OUT OF SCOPE: Non-Compliant Response Format
+
+**Current**: Returns `{"token": "..."}`
+**RFC**: Should return `{"access_token": "...", "issued_token_type": "...", "token_type": "..."}`
+
+**Reason**: HTTP API response format - not part of token format. Client integration can map response fields.
+
+---
+
+### ❌ OUT OF SCOPE: Missing Token Type URN Identifiers in API
+
+**Reason**: HTTP API parameter validation - not required for token format compliance
+
+---
+
+### ❌ OUT OF SCOPE: Missing resource/audience Request Parameters
+
+**Reason**: HTTP API parameters - audience can be set via role configuration
+
+---
+
+### ❌ OUT OF SCOPE: Missing scope Request Parameter
+
+**Reason**: HTTP API parameter - scopes configured via role context
+
+---
+
+### ❌ OUT OF SCOPE: Missing requested_token_type Parameter
+
+**Reason**: HTTP API parameter - plugin always issues JWT (valid design choice)
+
+---
+
+### ❌ OUT OF SCOPE: Missing RFC Error Codes
+
+**Reason**: HTTP API error response format - Vault has its own error handling patterns
+
+---
+
+## Design Decisions (Not Gaps)
+
+These are intentional design choices that differ from typical RFC 8693 implementations but are not compliance issues:
+
+### ✅ Endpoint Pattern: `/token/:name`
+
+**Current**: Role-based path routing
+**RFC 8693**: Typically single `/token` endpoint
+
+**Decision**: Acceptable - Vault uses path-based routing for all plugins
+
+---
+
+### ✅ Vault Token Authentication
+
+**Current**: Vault token authentication
+**RFC 8693**: OAuth 2.0 client authentication
+
+**Decision**: Acceptable - Vault has its own authentication model
+
+---
+
+### ✅ Subject Claims Structure
 
 **Current**: Wraps subject-derived claims under `subject_claims` key
 **Location**: `path_token_handlers.go:288`
@@ -443,9 +393,77 @@ claims["scope"] = strings.Join(role.Context, " ")  // Space-delimited
 claims["subject_claims"] = subjectClaims
 ```
 
-**RFC 8693**: No specific requirement, but this is non-standard
+**RFC 8693**: No specification (explicitly out of scope)
 
-**Impact**: Minor deviation; resource servers need custom logic to access subject claims
+**Decision**: Valid design choice - RFC 8693 Section 1 states claim handling from subject_token is "out of scope"
+
+**Alternative Options**:
+1. **Top-level merge** - Merge subject claims at top level (more standard)
+2. **Namespaced** (current) - Keep under `subject_claims` (clearer provenance)
+
+Both are RFC-compliant as the RFC doesn't specify this.
+
+---
+
+### ✅ Actor Metadata Storage (Beyond RFC Scope)
+
+**Decision**: The plugin MAY optionally store actor metadata (non-identity information) in the issued token, even though RFC 8693 does not specify this.
+
+**Status**: OPTIONAL custom extension
+
+**Rationale** (when used):
+- AI agent use cases may require rich context about the actor (agent type, department, capabilities, etc.)
+- Resource servers may need this metadata for authorization decisions (e.g., "only GPT-4 agents can access sensitive data")
+- Audit and compliance requirements may need detailed actor information
+
+**RFC 8693 Position**:
+- RFC 8693 Section 4.1 restricts the `act` claim to **identity only** (`sub`, `iss`)
+- Non-identity metadata is explicitly prohibited in `act` claim
+- RFC does not specify WHERE actor metadata should go (out of scope)
+
+**Implementation Options**:
+
+**Option 1: Top-Level Claims (Standard JWT Practice)**
+```json
+{
+  "sub": "user@example.com",
+  "act": {
+    "sub": "agent@example.com"         // Identity only (RFC 8693)
+  },
+
+  // Actor metadata at top level
+  "entity_id": "vault-entity-123",
+  "department": "AI Services",
+  "agent_type": "gpt-4",
+  "agent_version": "2.1.0"
+}
+```
+**Pros**: Standard JWT pattern; easy access
+**Cons**: Can clash with other top-level claims
+
+**Option 2: Namespaced Actor Metadata (Clearer)**
+```json
+{
+  "sub": "user@example.com",
+  "act": {
+    "sub": "agent@example.com"         // Identity only (RFC 8693)
+  },
+
+  // Actor metadata in namespace
+  "actor_metadata": {
+    "entity_id": "vault-entity-123",
+    "department": "AI Services",
+    "agent_type": "gpt-4",
+    "agent_version": "2.1.0"
+  }
+}
+```
+**Pros**: Clear provenance; no collision risk; consistent with `subject_claims` pattern
+**Cons**: Resource servers need to know custom structure
+
+**Recommended**: Option 2 (namespaced) for consistency with `subject_claims` approach and clear separation of concerns.
+
+**Note**: This is a **design extension**, not an RFC 8693 requirement. Resource servers must be aware of this custom structure.
 
 ---
 
@@ -679,68 +697,56 @@ Based on the plugin's use case (AI agents acting on behalf of users), recommend:
 
 ## Summary of Required Changes
 
-To bring the plugin inline with RFC 8693:
+### Token Format Changes (In Scope)
 
-### Request Schema Changes
-- [ ] Add `grant_type` parameter (MUST)
-- [ ] Add `subject_token_type` parameter (MUST)
-- [ ] Add `actor_token` parameter (SHOULD)
-- [ ] Add `actor_token_type` parameter (MUST when actor_token present)
-- [ ] Add `resource` parameter (SHOULD)
-- [ ] Add `audience` parameter (SHOULD)
-- [ ] Add `scope` parameter (SHOULD)
-- [ ] Add `requested_token_type` parameter (SHOULD)
+**Priority: HIGH**
+- [ ] Replace `obo` claim with `act` claim structure
+- [ ] Move actor identity to `act.sub` (identity only, no metadata)
+- [ ] Add top-level `scope` claim (space-delimited string)
+- [ ] Implement bound audience validation
+- [ ] Implement bound issuer validation
 
-### Response Format Changes
-- [ ] Rename `token` to `access_token` (MUST)
-- [ ] Add `issued_token_type` field (MUST)
-- [ ] Add `token_type` field (MUST)
-- [ ] Add `expires_in` field (RECOMMENDED)
-- [ ] Add `scope` field (OPTIONAL)
+**Priority: MEDIUM**
+- [ ] Decide on token structure organization:
+  - Option A: User claims top-level, actor metadata namespaced
+  - Option B: Both user and actor claims namespaced (symmetric)
+- [ ] Decide if actor metadata should be included (optional extension beyond RFC 8693)
+- [ ] Document subject claims handling approach
 
-### Token Claims Changes
-- [ ] Replace `obo` claim with `act` claim (MUST)
-- [ ] Move actor identity to `act.sub` (MUST)
-- [ ] Add top-level `scope` claim (SHOULD)
-- [ ] Support nested `act` for delegation chains (SHOULD)
-- [ ] Remove `subject_claims` wrapper (OPTIONAL)
+**Priority: LOW**
+- [ ] Support nested `act` for delegation chains (future enhancement)
+- [ ] Support `may_act` claim validation (future enhancement)
 
-### Validation Changes
-- [ ] Validate `grant_type` matches expected value (MUST)
-- [ ] Validate token type identifiers (MUST)
-- [ ] Implement bound audience validation (SHOULD)
-- [ ] Implement bound issuer validation (SHOULD)
-- [ ] Add `may_act` claim validation (OPTIONAL)
+### HTTP API Changes (Out of Scope)
 
-### Error Handling Changes
-- [ ] Use `invalid_request` error code (MUST)
-- [ ] Use `invalid_target` error code (SHOULD)
-- [ ] Return RFC-compliant error responses (MUST)
+These changes are NOT required for token format compliance:
+- ❌ Request parameter format changes (grant_type, subject_token_type, etc.)
+- ❌ Response format changes (access_token vs token)
+- ❌ Token type URN identifiers in API
+- ❌ RFC error codes
+- ❌ Explicit actor_token parameter support
 
-### Optional Enhancements
-- [ ] Support explicit `actor_token` parameter
-- [ ] Support multiple token types (SAML, etc.)
-- [ ] Implement JWKS caching for performance
-- [ ] Add delegation chain support
+**Rationale**: The plugin integrates with Vault's existing API patterns. Only the issued TOKEN needs to be RFC 8693 compliant, not the HTTP API.
 
 ---
 
 ## Impact Assessment
 
-### Breaking Changes
-- Request format changes (new required parameters)
-- Response format changes (renamed fields)
-- Token claim structure changes (obo → act)
+### Breaking Changes (Token Format Only)
+- Token claim structure changes (`obo` → `act`)
+- Scope format changes (comma-delimited → space-delimited)
+- Token structure changes (actor-centric → user-centric)
 
 ### Backward Compatibility Options
-1. Support both old and new formats during transition period
-2. Use configuration flag to enable RFC compliance mode
-3. Create new endpoint (`/token-exchange`) alongside existing endpoint
+1. **Dual-claim period**: Issue both `obo` and `act` claims temporarily
+2. **Configuration flag**: Enable RFC-compliant token format per role
+3. **Version in token**: Add claim indicating token format version
 
 ### Migration Considerations
-- Existing clients will need updates
-- Resource servers expecting `obo` claim will need updates
-- Consider deprecation timeline for old format
+- **Resource servers** expecting `obo` claim will need updates to recognize `act`
+- **Clients** using the HTTP API don't need changes (API stays the same)
+- **Token validators** will need to handle new claim structure
+- Consider deprecation timeline for `obo` claim (6-12 months)
 
 ---
 

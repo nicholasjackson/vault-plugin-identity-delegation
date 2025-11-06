@@ -115,6 +115,89 @@ The exchanged token contains claims from both:
 
 This creates a clear audit trail showing both who authorized the action (subject) and who performed it (actor).
 
+### Authorization Model: Policy-Based vs. Consent-Based
+
+**Important:** This plugin uses **policy-based authorization**, not runtime user consent. Understanding this distinction is critical for security and compliance:
+
+#### How This Plugin Works (Policy-Based)
+
+```
+┌──────────────────────────────────────────────────┐
+│ Configuration Time (Admin)                       │
+├──────────────────────────────────────────────────┤
+│ Admin → Creates role with allowed scopes         │
+│ Admin → Configures bound issuer/audiences        │
+│ Admin → Grants agent access to role              │
+└──────────────────────────────────────────────────┘
+                     ↓
+┌──────────────────────────────────────────────────┐
+│ Runtime (Automatic)                              │
+├──────────────────────────────────────────────────┤
+│ Agent → Presents user token + Vault auth         │
+│ Vault → Validates + Exchanges (no user prompt)   │
+│ Agent → Receives delegated token                 │
+└──────────────────────────────────────────────────┘
+```
+
+**Characteristics:**
+- **Administrators** pre-authorize agents via Vault policies and roles
+- **No runtime user interaction** - token exchange happens server-to-server
+- **Users never see** which agent is acting on their behalf
+- **Scopes are fixed** in role configuration, not chosen by users
+
+#### Alternative: Consent-Based Authorization (OAuth Standard)
+
+For comparison, standard OAuth 2.0 consent-based flows work differently:
+
+```
+┌──────────────────────────────────────────────────┐
+│ Runtime (User Consent)                           │
+├──────────────────────────────────────────────────┤
+│ Agent → Redirects user to authorization page     │
+│ User → Sees "Agent X wants to access Y"          │
+│ User → Clicks "Allow" or "Deny"                  │
+│ IdP → Issues token only if user approved         │
+└──────────────────────────────────────────────────┘
+```
+
+**Characteristics:**
+- **Users** explicitly authorize each agent at runtime
+- **Consent screen** shows agent identity and requested scopes
+- **Users can deny** or grant subset of scopes
+- **Full audit trail** of user consent decisions
+
+See [draft-oauth-ai-agents-on-behalf-of-user](https://www.ietf.org/archive/id/draft-oauth-ai-agents-on-behalf-of-user-01.html) for the OAuth standard approach.
+
+#### When to Use This Plugin
+
+**✅ Appropriate Use Cases:**
+- Enterprise internal agents where administrators control authorization policies
+- Service-to-service delegation with user context in trusted environments
+- Backend systems where user consent has been obtained through other means
+- Centralized policy management via Vault is required
+
+**❌ Not Appropriate For:**
+- Consumer-facing AI assistants requiring explicit user consent (e.g., "ChatGPT wants to access your email")
+- Compliance scenarios mandating runtime user authorization
+- Public APIs where users must approve each agent individually
+- Applications where users need to revoke agent access dynamically
+
+#### Security Implications
+
+**Policy-Based (This Plugin):**
+- Security depends on administrator policy configuration
+- Users trust administrators to configure appropriate agent permissions
+- Agent authorization persists until admin modifies role
+- No user visibility into which agents are authorized
+
+**Consent-Based (OAuth Standard):**
+- Security depends on user consent decisions
+- Users directly control which agents can act on their behalf
+- Agent authorization can be revoked by user at any time
+- Full transparency of agent access to users
+
+**Recommendation:** For consumer-facing applications or compliance-sensitive environments requiring explicit user consent, consider implementing the full OAuth 2.0 consent flow instead of or in addition to this plugin.
+
 ### Configure the Plugin
 
 ```bash

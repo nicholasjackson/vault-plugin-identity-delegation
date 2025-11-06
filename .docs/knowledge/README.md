@@ -11,6 +11,9 @@ For workflow and process information, see the `iw-workflow` skill (auto-loaded).
 
 Formalized system architecture and design patterns.
 
+**Current Documentation:**
+- [`token-format-rfc8693.md`](architecture/token-format-rfc8693.md) - Token format MUST follow RFC 8693 (OAuth 2.0 Token Exchange) standard. Defines required claims, delegation semantics, and prohibited patterns.
+
 ### `/conventions/` - Project-Specific Conventions
 
 Project-specific naming, structure, and coding conventions that differ from general standards.

@@ -48,7 +48,7 @@ func pathRole(b *Backend) *framework.Path {
 			},
 			"actor_template": {
 				Type:        framework.TypeString,
-				Description: "JSON template for additional claims in the generated token, claims are added to the main token claims",
+				Description: "JSON template for actor-related claims (RFC 8693). Should include 'act' claim with actor identity. Optional 'actor_metadata' for additional actor context. Example: {\"act\": {\"sub\": \"{{identity.entity.id}}\"}, \"actor_metadata\": {\"department\": \"IT\"}}",
 				Required:    true,
 			},
 			"subject_template": {
@@ -58,7 +58,7 @@ func pathRole(b *Backend) *framework.Path {
 			},
 			"context": {
 				Type:        framework.TypeCommaStringSlice,
-				Description: "List of permitted delegate scopes to map to the on-behalf-of 'ctx' claim in the generated token, delegate scopes restrict the permissions of the generated token. i.e 'urn:documents.service:read,urn:images.service:write'",
+				Description: "List of permitted scopes for the delegated token (RFC 8693). Maps to 'scope' claim as space-delimited string. Example: 'urn:documents.service:read,urn:images.service:write' becomes 'urn:documents.service:read urn:images.service:write'",
 				Required:    true,
 			},
 		},

@@ -66,6 +66,16 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 		return logical.ErrorResponse("subject token expired: %v", err), nil
 	}
 
+	// Validate bound issuer
+	if err := validateBoundIssuer(originalSubjectClaims, role.BoundIssuer); err != nil {
+		return logical.ErrorResponse("failed to validate issuer: %v", err), nil
+	}
+
+	// Validate bound audiences
+	if err := validateBoundAudiences(originalSubjectClaims, role.BoundAudiences); err != nil {
+		return logical.ErrorResponse("failed to validate audience: %v", err), nil
+	}
+
 	// Fetch entity
 	b.Logger().Info("Get EntityID", "entity_id", req.EntityID)
 	entity, err := fetchEntity(req, b.System())
@@ -102,7 +112,7 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 	}
 
 	// Generate new token
-	newToken, err := generateToken(config, role, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey)
+	newToken, err := generateToken(config, role, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey, req.EntityID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -224,6 +234,69 @@ func checkExpiration(claims map[string]any) error {
 	return nil
 }
 
+// validateBoundIssuer checks if the token issuer matches the role's bound issuer
+func validateBoundIssuer(claims map[string]any, boundIssuer string) error {
+	if boundIssuer == "" {
+		return nil // No bound issuer configured, skip validation
+	}
+
+	iss, ok := claims["iss"]
+	if !ok {
+		return fmt.Errorf("token missing iss claim")
+	}
+
+	issStr, ok := iss.(string)
+	if !ok {
+		return fmt.Errorf("invalid iss claim type")
+	}
+
+	if issStr != boundIssuer {
+		return fmt.Errorf("token issuer %q does not match bound_issuer %q", issStr, boundIssuer)
+	}
+
+	return nil
+}
+
+// validateBoundAudiences checks if the token audience matches any of the role's bound audiences
+func validateBoundAudiences(claims map[string]any, boundAudiences []string) error {
+	if len(boundAudiences) == 0 {
+		return nil // No bound audiences configured, skip validation
+	}
+
+	aud, ok := claims["aud"]
+	if !ok {
+		return fmt.Errorf("token missing aud claim")
+	}
+
+	// JWT aud claim can be string or []string
+	var tokenAudiences []string
+	switch v := aud.(type) {
+	case string:
+		tokenAudiences = []string{v}
+	case []interface{}:
+		for _, audVal := range v {
+			if audStr, ok := audVal.(string); ok {
+				tokenAudiences = append(tokenAudiences, audStr)
+			}
+		}
+	case []string:
+		tokenAudiences = v
+	default:
+		return fmt.Errorf("invalid aud claim type")
+	}
+
+	// Check if any token audience matches any bound audience
+	for _, tokenAud := range tokenAudiences {
+		for _, boundAud := range boundAudiences {
+			if tokenAud == boundAud {
+				return nil // Match found
+			}
+		}
+	}
+
+	return fmt.Errorf("token audience does not match any bound_audiences")
+}
+
 // fetchEntity retrieves the entity associated with the request
 func fetchEntity(req *logical.Request, system logical.SystemView) (*logical.Entity, error) {
 	entityID := req.EntityID
@@ -259,7 +332,7 @@ func processTemplate(template string, claims map[string]any) (map[string]any, er
 }
 
 // generateToken generates a new JWT with the merged claims
-func generateToken(config *Config, role *Role, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey) (string, error) {
+func generateToken(config *Config, role *Role, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey, entityID string) (string, error) {
 	// Create signer
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: signingKey},
@@ -284,21 +357,46 @@ func generateToken(config *Config, role *Role, subjectID string, actorClaims, su
 		claims["aud"] = aud
 	}
 
-	// add the subject claims under "subject_claims" key
-	claims["subject_claims"] = subjectClaims
+	// Add RFC 8693 actor claim (delegation)
+	// The act claim contains ONLY the actor's identity (sub, iss)
+	actorSubject := ""
 
-	// Merge actor claims
-	for key, value := range actorClaims {
-		// Don't allow overriding reserved claims
-		if key != "iss" && key != "sub" && key != "iat" && key != "exp" && key != "aud" {
-			claims[key] = value
+	// Check if actor_template provided act.sub
+	if actClaimRaw, ok := actorClaims["act"]; ok {
+		if actClaimMap, ok := actClaimRaw.(map[string]any); ok {
+			if sub, ok := actClaimMap["sub"].(string); ok {
+				actorSubject = sub
+			}
 		}
 	}
 
-	// Add the on-behalf-of context
-	claims["obo"] = map[string]any{
-		"prn": subjectID,
-		"ctx": strings.Join(role.Context, ","),
+	// If no actor subject in template, construct from entity ID
+	if actorSubject == "" {
+		actorSubject = fmt.Sprintf("entity:%s", entityID)
+	}
+
+	claims["act"] = map[string]any{
+		"sub": actorSubject,
+		"iss": config.Issuer, // Optional: issuer of actor identity
+	}
+
+	// Add RFC 8693 scope claim (space-delimited)
+	if len(role.Context) > 0 {
+		claims["scope"] = strings.Join(role.Context, " ")
+	}
+
+	// Add subject claims under "subject_claims" key (optional extension)
+	if len(subjectClaims) > 0 {
+		claims["subject_claims"] = subjectClaims
+	}
+
+	// Merge actor claims for optional extensions (e.g., actor_metadata)
+	// This allows templates to add custom actor metadata outside the act claim
+	for key, value := range actorClaims {
+		// Don't allow overriding reserved claims or act claim
+		if key != "iss" && key != "sub" && key != "iat" && key != "exp" && key != "aud" && key != "act" {
+			claims[key] = value
+		}
 	}
 
 	// Build and sign token

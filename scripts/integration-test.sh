@@ -57,6 +57,12 @@ vault write identity/oidc/key/user-key \
     rotation_period=86400 \
     algorithm=RS256
 
+vault write identity/oidc/key/agent-key \
+    allowed_client_ids="*" \
+    verification_ttl=86400 \
+    rotation_period=86400 \
+    algorithm=RS256
+
 # Define the template for the JWT
 TEMPLATE='{
   "username": {{identity.entity.aliases.<mount accessor>.name}},
@@ -73,16 +79,24 @@ vault write identity/oidc/role/user \
  template="$(echo ${TEMPLATE} | base64)" \
  ttl=3600
 
+vault write identity/oidc/role/agent \
+ key="agent-key" \
+ template="$(echo ${TEMPLATE} | base64)" \
+ ttl=3600
+
 # Create an example entity and alias for the root user
 
-# Create custom policy for Admin user
-vault policy write admin-policy - <<EOF
-path "identity-delegation/token/test-role-1" {
-  capabilities = ["create","update"]
-}
-
+# Create custom policy for User
+vault policy write user-policy - <<EOF
 path "identity/oidc/token/user" {
   capabilities = ["read"]
+}
+EOF
+
+# Create custom policy for Agent
+vault policy write agent-policy - <<EOF
+path "identity-delegation/token/agent" {
+  capabilities = ["create","update"]
 }
 EOF
 
@@ -90,35 +104,57 @@ EOF
 vault auth enable userpass
 
 # Create a user
-vault write auth/userpass/users/admin \
+vault write auth/userpass/users/user \
     password="your-password" \
-    policies="default,admin-policy"
+    policies="default,user-policy"
+
+vault write auth/userpass/users/agent \
+    password="your-password" \
+    policies="default,agent-policy"
 
 # Get userpass mount accessor
 MOUNT_ACCESSOR=$(vault auth list -format=json | jq -r '.["userpass/"].accessor')
 
-# Create entity
+# Create agent entity
 ENTITY_ID=$(
   vault write \
     -format=json identity/entity \
-    name="admin" \
-    metadata=email="admin@example.com" \
+    name="agent" \
+    metadata=email="agent@example.com" \
     metadata=department="IT" \
-    metadata=role="administrator" \
+    metadata=role="agent" \
+    metadata=manager="it@email.com" \
+  | jq -r '.data.id')
+
+# Create agent alias
+vault write identity/entity-alias \
+    name="agent" \
+    canonical_id="${ENTITY_ID}" \
+    mount_accessor="${MOUNT_ACCESSOR}"
+
+# Create user entity
+ENTITY_ID=$(
+  vault write \
+    -format=json identity/entity \
+    name="user" \
+    metadata=email="user@example.com" \
+    metadata=department="IT" \
+    metadata=role="user" \
     metadata=manager="nic@email.com" \
   | jq -r '.data.id')
 
-# Create alias
+# Create agent alias
 vault write identity/entity-alias \
-    name="admin" \
+    name="user" \
     canonical_id="${ENTITY_ID}" \
     mount_accessor="${MOUNT_ACCESSOR}"
 
 # Login with userpass
-ADMIN_TOKEN=$(vault login -method=userpass -token-only username=admin password=your-password)
+AGENT_TOKEN=$(vault login -method=userpass -token-only username=agent password=your-password)
+USER_TOKEN=$(vault login -method=userpass -token-only username=user password=your-password)
 
-# Now try OIDC token
-OIDC_TOKEN=$(VAULT_TOKEN=${ADMIN_TOKEN} vault read --format=json identity/oidc/token/user | jq -r '.data.token')
+# Now fetch an OIDC token that represents the user entity
+OIDC_TOKEN=$(VAULT_TOKEN=${USER_TOKEN} vault read --format=json identity/oidc/token/user | jq -r '.data.token')
 echo "OIDC Token: $OIDC_TOKEN"
 echo ""
 
@@ -191,13 +227,13 @@ if ! echo "$ROLE_DATA" | grep -q "{{identity.entity.id}}"; then
 fi
 
 # Update role
-vault write identity-delegation/role/test-role-1 \
+vault write identity-delegation/role/agent \
     ttl="3h" \
     context="urn:documents.service:read,urn:images.service:write" \
     actor_template='{"act": {"sub": "agent-123-updated"}}' \
     subject_template='{"act": {"sub": "agent-123-updated"}}' > /dev/null
 
-UPDATED_ROLE=$(vault read -format=json identity-delegation/role/test-role-1)
+UPDATED_ROLE=$(vault read -format=json identity-delegation/role/agent)
 if ! echo "$UPDATED_ROLE" | grep -q "agent-123-updated"; then
     echo "❌ FAIL: Role update failed"
     exit 1
@@ -220,8 +256,8 @@ echo "The Go tests (go test) cover JWT validation and exchange logic."
 echo ""
 
 DELEGATE_TOKEN=$(
-  VAULT_TOKEN=${ADMIN_TOKEN} vault write \
-    --format=json identity-delegation/token/test-role-1 \
+  VAULT_TOKEN=${AGENT_TOKEN} vault write \
+    --format=json identity-delegation/token/agent \
     subject_token="${OIDC_TOKEN}" \
   | jq -r '.data.token'
 )
