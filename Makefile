@@ -20,7 +20,7 @@ help: ## Display this help message
 build: ## Build the plugin binary
 	@echo "Building plugin..."
 	@mkdir -p $(BUILD_DIR)
-	@go build -o $(BUILD_DIR)/$(BINARY) cmd/vault-plugin-identity-delegation/main.go
+	@CGO_ENABLED=0 go build -o $(BUILD_DIR)/$(BINARY) cmd/vault-plugin-identity-delegation/main.go
 	@echo "✓ Binary built: $(BUILD_DIR)/$(BINARY)"
 
 build-all: ## Build the plugin for all platforms
@@ -34,7 +34,7 @@ build-all: ## Build the plugin for all platforms
 			OUTPUT_NAME=$$OUTPUT_NAME.exe; \
 		fi; \
 		echo "Building $$GOOS/$$GOARCH..."; \
-		GOOS=$$GOOS GOARCH=$$GOARCH go build -o $$OUTPUT_NAME cmd/vault-plugin-identity-delegation/main.go; \
+		CGO_ENABLED=0 GOOS=$$GOOS GOARCH=$$GOARCH go build -o $$OUTPUT_NAME cmd/vault-plugin-identity-delegation/main.go; \
 		if [ $$? -eq 0 ]; then \
 			echo "  ✓ Built: $$OUTPUT_NAME"; \
 		else \
