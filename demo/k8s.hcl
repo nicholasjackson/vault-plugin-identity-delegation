@@ -25,8 +25,42 @@ resource "helm" "vault_operator" {
 
   health_check {
     timeout = "120s"
-    pods    = ["app.kubernetes.io/name=vault-secretss-operator"]
+    pods    = ["app.kubernetes.io/instance=vault-operator"]
   }
+}
+
+# Configure Kubernetes authentication in Vault
+# This creates the necessary service accounts and configures the auth method
+resource "exec" "configure_k8s_auth" {
+  disabled = !variable.run_scripts
+
+  depends_on = [
+    "resource.helm.vault_operator",
+    "resource.container.vault"
+  ]
+
+  script = file("./scripts/setup-k8s-auth.sh")
+
+  environment = {
+    KUBECONFIG  = resource.k8s_cluster.demo.kube_config.path
+    VAULT_ADDR  = "http://localhost:8200"
+    VAULT_TOKEN = "root"
+  }
+}
+
+# Apply the VaultAuth and VaultStaticSecret resources
+resource "k8s_config" "vault_auth" {
+  disabled = !variable.run_scripts
+
+  depends_on = ["resource.exec.configure_k8s_auth"]
+
+  cluster = resource.k8s_cluster.demo
+
+  paths = [
+    "./vso/auth.yaml"
+  ]
+
+  wait_until_ready = true
 }
 
 # Output Kubernetes configuration

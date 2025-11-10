@@ -16,7 +16,7 @@ variable "plugin_platform" {
 }
 
 variable "run_scripts" {
-  default = false
+  default = true
 }
 
 # Create an isolated network for the demo
