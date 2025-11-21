@@ -36,8 +36,12 @@ output "KEYCLOAK_URL" {
   value = "http://localhost:8080"
 }
 
-output "keycloak_admin" {
-  value = "admin / admin"
+output "KEYCLOAK_ADMIN" {
+  value = "admin"
+}
+
+output "KEYCLOAK_ADMIN_PASSWORD" {
+  value = "admin"
 }
 
 output "VAULT_ADDR" {

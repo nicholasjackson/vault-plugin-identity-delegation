@@ -7,7 +7,7 @@ echo "================================"
 
 # Wait for Keycloak to be fully ready
 echo "Waiting for Keycloak to be ready..."
-until curl -sf "${KEYCLOAK_URL}/health/ready" > /dev/null 2>&1; do
+until curl -sf "${KEYCLOAK_URL}" > /dev/null 2>&1; do
   echo "Keycloak not ready yet, waiting..."
   sleep 2
 done

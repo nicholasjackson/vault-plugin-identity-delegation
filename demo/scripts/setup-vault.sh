@@ -12,34 +12,37 @@ until vault status > /dev/null 2>&1; do
 done
 echo "Vault is ready!"
 
+CURRENT_DIR=$(dirname "$0")
+PLUGIN_DIR="${CURRENT_DIR}/../build"
+
 # Check if plugin is already enabled
-echo "Checking if token-exchange plugin is already configured..."
-if vault secrets list | grep -q "^token-exchange/"; then
-  echo "Plugin already enabled at token-exchange/. Skipping configuration."
+echo "Checking if identity-delegation plugin is already configured..."
+if vault secrets list | grep -q "^identity-delegation/"; then
+  echo "Plugin already enabled at identity-delegation/. Skipping configuration."
   exit 0
 fi
 echo "Plugin not found, proceeding with configuration..."
 
 # Get the plugin SHA256
 echo "Calculating plugin SHA256..."
-PLUGIN_SHA256=$(sha256sum /vault/plugins/vault-plugin-token-exchange | cut -d' ' -f1)
+PLUGIN_SHA256=$(sha256sum ${PLUGIN_DIR}/vault-plugin-identity-delegation | cut -d' ' -f1)
 echo "Plugin SHA256: ${PLUGIN_SHA256}"
 
 # Register the plugin
 echo "Registering token exchange plugin..."
 vault plugin register \
   -sha256="${PLUGIN_SHA256}" \
-  -command="vault-plugin-token-exchange" \
+  -command="vault-plugin-identity-delegation" \
   secret \
-  vault-plugin-token-exchange
+  vault-plugin-identity-delegation
 
 echo "Plugin registered successfully!"
 
 # Enable the plugin
-echo "Enabling token exchange plugin at path: token-exchange"
+echo "Enabling token exchange plugin at path: identity-delegation"
 vault secrets enable \
-  -path=token-exchange \
-  -plugin-name=vault-plugin-token-exchange \
+  -path=identity-delegation \
+  -plugin-name=vault-plugin-identity-delegation \
   plugin
 
 echo "Plugin enabled successfully!"
@@ -90,7 +93,7 @@ EOF
 
 # Configure the token exchange with Keycloak JWKS endpoint
 # Note: Using demo realm for token validation
-vault write token-exchange/config \
+vault write identity-delegation/config \
   subject_jwks_uri="${KEYCLOAK_URL}/realms/demo/protocol/openid-connect/certs" \
   issuer="https://vault.local" \
   default_ttl="1h" \
@@ -100,7 +103,7 @@ echo "Plugin configured with Keycloak JWKS endpoint!"
 
 # Create a sample role for token exchange
 echo "Creating sample token exchange role..."
-vault write token-exchange/role/demo-agent \
+vault write identity-delegation/role/demo-agent \
   bound_issuer="${KEYCLOAK_URL}/realms/demo" \
   bound_audiences="demo-app" \
   context="read:documents,write:documents" \
@@ -111,7 +114,7 @@ vault write token-exchange/role/demo-agent \
 echo "Sample role created: demo-agent"
 
 # Create an additional role for user tokens
-vault write token-exchange/role/user-agent \
+vault write identity-delegation/role/user-agent \
   bound_issuer="${KEYCLOAK_URL}/realms/demo" \
   bound_audiences="demo-app" \
   context="read:profile,write:profile" \
@@ -128,12 +131,12 @@ echo "================================"
 echo "Vault Address: ${VAULT_ADDR}"
 echo "Vault Token: ${VAULT_TOKEN}"
 echo ""
-echo "Plugin enabled at: ${VAULT_ADDR}/v1/token-exchange"
+echo "Plugin enabled at: ${VAULT_ADDR}/v1/identity-delegation"
 echo "Available roles:"
 echo "  - demo-agent (read:documents, write:documents)"
 echo "  - user-agent (read:profile, write:profile)"
 echo ""
 echo "To test the plugin:"
-echo "  vault read token-exchange/config"
-echo "  vault list token-exchange/role"
+echo "  vault read identity-delegation/config"
+echo "  vault list identity-delegation/role"
 echo ""
