@@ -71,12 +71,44 @@ func createMockJWKSServer(t *testing.T, publicKey *rsa.PublicKey, kid string) *h
 	return server
 }
 
+// createTestKey creates a test key in storage and returns the key ID
+// If privateKeyPEM is empty, a new key pair is generated
+func createTestKey(t *testing.T, b *Backend, storage logical.Storage, keyName string, privateKeyPEM ...string) string {
+	var keyPEM string
+	if len(privateKeyPEM) > 0 && privateKeyPEM[0] != "" {
+		keyPEM = privateKeyPEM[0]
+	} else {
+		_, keyPEM = generateTestKeyPair(t)
+	}
+
+	keyReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "key/" + keyName,
+		Storage:   storage,
+		Data: map[string]any{
+			"algorithm":   "RS256",
+			"private_key": keyPEM,
+		},
+	}
+	keyResp, err := b.HandleRequest(context.Background(), keyReq)
+	require.NoError(t, err)
+	if keyResp != nil && keyResp.IsError() {
+		t.Fatalf("key creation failed: %v", keyResp.Error())
+	}
+	require.NotNil(t, keyResp)
+	require.NotNil(t, keyResp.Data)
+
+	keyID, ok := keyResp.Data["key_id"].(string)
+	require.True(t, ok, "key_id should be a string")
+	return keyID
+}
+
 // TestTokenExchange_Success tests successful token exchange
 func TestTokenExchange_Success(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Generate test key pair
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 
 	// Create mock JWKS server
 	testKID := "test-key-1"
@@ -106,6 +138,7 @@ func TestTokenExchange_Success(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"subject_template": `{"act": {"sub": "{{identity.subject.email}}"} }`,
 			"actor_template":   `{"act": {"sub": "{{identity.entity.id}}"} }`,
 			"context":          "urn:documents.service:read,urn:images.service:write",
@@ -163,6 +196,9 @@ func TestTokenExchange_MissingSubjectToken(t *testing.T) {
 			"default_ttl": "1h",
 		},
 	}
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	_, err := b.HandleRequest(context.Background(), configReq)
 	require.NoError(t, err)
 
@@ -174,6 +210,7 @@ func TestTokenExchange_MissingSubjectToken(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -215,6 +252,9 @@ func TestTokenExchange_InvalidJWT(t *testing.T) {
 			"default_ttl": "1h",
 		},
 	}
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	_, err := b.HandleRequest(context.Background(), configReq)
 	require.NoError(t, err)
 
@@ -226,6 +266,7 @@ func TestTokenExchange_InvalidJWT(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -254,8 +295,8 @@ func TestTokenExchange_InvalidJWT(t *testing.T) {
 func TestTokenExchange_ExpiredToken(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Generate test key pair
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 
 	// Create mock JWKS server
 	testKID := "test-key-1"
@@ -285,6 +326,7 @@ func TestTokenExchange_ExpiredToken(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -377,8 +419,8 @@ func TestTokenExchange_RoleNotFound(t *testing.T) {
 func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Generate test key pair
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 
 	// Create mock JWKS server
 	testKID := "test-key-1"
@@ -408,6 +450,7 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -473,6 +516,9 @@ func TestTokenExchange_VerifyGeneratedToken(t *testing.T) {
 func TestTokenExchange_BoundIssuerMismatch(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 	testKID := "test-key-1"
@@ -502,6 +548,7 @@ func TestTokenExchange_BoundIssuerMismatch(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"bound_issuer":     "https://trusted-idp.example.com", // Required issuer
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "IT"}`,
@@ -543,6 +590,9 @@ func TestTokenExchange_BoundIssuerMismatch(t *testing.T) {
 func TestTokenExchange_BoundIssuerMatch(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 	testKID := "test-key-1"
@@ -572,6 +622,7 @@ func TestTokenExchange_BoundIssuerMatch(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"bound_issuer":     "https://trusted-idp.example.com", // Required issuer
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "IT"}`,
@@ -613,6 +664,9 @@ func TestTokenExchange_BoundIssuerMatch(t *testing.T) {
 func TestTokenExchange_BoundAudienceMismatch(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 	testKID := "test-key-1"
@@ -642,6 +696,7 @@ func TestTokenExchange_BoundAudienceMismatch(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"bound_audiences":  []string{"service-a", "service-b"}, // Allowed audiences
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "IT"}`,
@@ -683,6 +738,9 @@ func TestTokenExchange_BoundAudienceMismatch(t *testing.T) {
 func TestTokenExchange_BoundAudienceMatch(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 	testKID := "test-key-1"
@@ -712,6 +770,7 @@ func TestTokenExchange_BoundAudienceMatch(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"bound_audiences":  []string{"service-a", "service-b"}, // Allowed audiences
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "IT"}`,
@@ -753,6 +812,9 @@ func TestTokenExchange_BoundAudienceMatch(t *testing.T) {
 func TestTokenExchange_BoundAudienceMatchArray(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
 	testKID := "test-key-1"
@@ -782,6 +844,7 @@ func TestTokenExchange_BoundAudienceMatchArray(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"bound_audiences":  []string{"service-a", "service-b"},
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "IT"}`,
@@ -825,6 +888,7 @@ func TestTokenExchange_ActClaimStructure(t *testing.T) {
 
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -852,6 +916,7 @@ func TestTokenExchange_ActClaimStructure(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{}`, // Empty template to use default
 			"subject_template": `{"department": "IT"}`,
 			"context":          []string{"urn:documents:read", "urn:images:write"},
@@ -941,6 +1006,7 @@ func TestTokenExchange_ActorMetadataOptional(t *testing.T) {
 
 	// Generate test key pair and JWKS server
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -968,6 +1034,7 @@ func TestTokenExchange_ActorMetadataOptional(t *testing.T) {
 		Data: map[string]any{
 			"name": "test-role",
 			"ttl":  "1h",
+   "key":              "test-key",
 			"actor_template": `{
 				"actor_metadata": {
 					"entity_id": "{{identity.entity.id}}",

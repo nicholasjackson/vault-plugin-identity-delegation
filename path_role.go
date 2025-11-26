@@ -16,6 +16,7 @@ type Role struct {
 	ActorTemplate   string        `json:"actor_template"`
 	SubjectTemplate string        `json:"subject_template"`
 	Context         []string      `json:"context"`
+	Key             string        `json:"key"` // NEW: reference to named key (optional)
 }
 
 const roleStoragePrefix = "roles/"
@@ -59,6 +60,11 @@ func pathRole(b *Backend) *framework.Path {
 			"context": {
 				Type:        framework.TypeCommaStringSlice,
 				Description: "List of permitted scopes for the delegated token (RFC 8693). Maps to 'scope' claim as space-delimited string. Example: 'urn:documents.service:read,urn:images.service:write' becomes 'urn:documents.service:read urn:images.service:write'",
+				Required:    true,
+			},
+			"key": {
+				Type:        framework.TypeString,
+				Description: "Name of the signing key to use for this role.",
 				Required:    true,
 			},
 		},

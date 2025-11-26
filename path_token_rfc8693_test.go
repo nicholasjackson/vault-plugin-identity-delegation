@@ -17,6 +17,9 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 
 	// Setup
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+
+	// Create test key with this private key
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -42,6 +45,7 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 		Data: map[string]any{
 			"name": "test-role",
 			"ttl":  "1h",
+   "key":              "test-key",
 			"actor_template": `{
 				"act": {"sub": "agent:{{identity.entity.id}}"},
 				"actor_metadata": {
@@ -167,6 +171,7 @@ func TestRFC8693_UserCentricSemantics(t *testing.T) {
 	b, storage := getTestBackend(t)
 
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -192,6 +197,7 @@ func TestRFC8693_UserCentricSemantics(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent:{{identity.entity.id}}"}}`,
 			"subject_template": `{}`,
 			"context":          []string{"urn:documents:read"},
@@ -276,6 +282,7 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 			b, storage := getTestBackend(t)
 
 			privateKey, privateKeyPEM := generateTestKeyPair(t)
+			createTestKey(t, b, storage, "test-key", privateKeyPEM)
 			testKID := "test-key-1"
 			jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 			defer jwksServer.Close()
@@ -289,9 +296,9 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 					"subject_jwks_uri": jwksServer.URL,
 					"signing_key":      privateKeyPEM,
 					"default_ttl":      "1h",
-				},
-			}
-			_, err := b.HandleRequest(context.Background(), configReq)
+							},
+		}
+		_, err := b.HandleRequest(context.Background(), configReq)
 			require.NoError(t, err)
 
 			roleReq := &logical.Request{
@@ -301,6 +308,7 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 				Data: map[string]any{
 					"name":             "test-role",
 					"ttl":              "1h",
+     "key":              "test-key",
 					"actor_template":   `{"act": {"sub": "agent"}}`,
 					"subject_template": `{}`,
 					"context":          tc.contextInput,

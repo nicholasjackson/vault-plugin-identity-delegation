@@ -15,6 +15,7 @@ func TestContextMapsToScope(t *testing.T) {
 	b, storage := getTestBackend(t)
 
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -31,6 +32,7 @@ func TestContextMapsToScope(t *testing.T) {
 			"default_ttl":      "1h",
 		},
 	}
+
 	_, err := b.HandleRequest(context.Background(), configReq)
 	require.NoError(t, err)
 
@@ -42,6 +44,7 @@ func TestContextMapsToScope(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent"}}`,
 			"subject_template": `{}`,
 			"context":          []string{"urn:scope1", "urn:scope2", "urn:scope3"},
@@ -96,6 +99,7 @@ func TestContextToScopeEndToEnd(t *testing.T) {
 	b, storage := getTestBackend(t)
 
 	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key", privateKeyPEM)
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -112,6 +116,7 @@ func TestContextToScopeEndToEnd(t *testing.T) {
 			"default_ttl":      "1h",
 		},
 	}
+
 	_, err := b.HandleRequest(context.Background(), configReq)
 	require.NoError(t, err, "Config should be created")
 
@@ -123,6 +128,7 @@ func TestContextToScopeEndToEnd(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-id"}}`,
 			"subject_template": `{}`,
 			"context":          []string{"urn:docs:read", "urn:docs:write", "urn:images:delete"},
