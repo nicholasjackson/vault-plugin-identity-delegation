@@ -195,16 +195,67 @@ echo "✓ Plugin configured correctly"
 echo "✓ Signing key not exposed in read operation"
 echo ""
 
+# Create signing keys
+echo "Test 3: Create and manage signing keys..."
+
+# Create key with auto-generated key pair
+vault write identity-delegation/key/test-key \
+    algorithm="RS256" > /dev/null
+
+# Create key with provided private key
+vault write identity-delegation/key/custom-key \
+    algorithm="RS256" \
+    private_key="$PRIVATE_KEY" > /dev/null
+
+# List keys
+KEY_LIST=$(vault list -format=json identity-delegation/key/)
+if ! echo "$KEY_LIST" | grep -q "test-key"; then
+    echo "❌ FAIL: Key listing failed"
+    exit 1
+fi
+
+# Read key (should return public key, not private)
+KEY_DATA=$(vault read -format=json identity-delegation/key/test-key)
+if echo "$KEY_DATA" | jq -r '.data.private_key' | grep -q "BEGIN"; then
+    echo "❌ FAIL: Private key exposed in read operation (security issue)"
+    exit 1
+fi
+if ! echo "$KEY_DATA" | jq -r '.data.public_key' | grep -q "BEGIN RSA PUBLIC KEY"; then
+    echo "❌ FAIL: Public key not returned"
+    exit 1
+fi
+
+echo "✓ Key management operations work correctly"
+echo "✓ Private keys not exposed in read operations"
+echo ""
+
+# Test JWKS endpoint
+echo "Test 4: JWKS endpoint..."
+JWKS_OUTPUT=$(curl -s "$VAULT_ADDR/v1/identity-delegation/jwks")
+if ! echo "$JWKS_OUTPUT" | jq -e '.keys | length > 0' > /dev/null; then
+    echo "❌ FAIL: JWKS endpoint did not return keys"
+    exit 1
+fi
+if ! echo "$JWKS_OUTPUT" | jq -e '.keys[0] | has("kid")' > /dev/null; then
+    echo "❌ FAIL: JWKS keys missing kid field"
+    exit 1
+fi
+
+echo "✓ JWKS endpoint working correctly"
+echo ""
+
 # Create roles
-echo "Test 3: Create and manage roles..."
+echo "Test 5: Create and manage roles..."
 
 vault write identity-delegation/role/test-role-1 \
+    key="test-key" \
     ttl="1h" \
     context="urn:documents.service:read,urn:images.service:write" \
     actor_template='{"username": "{{identity.entity.id}}" }' \
     subject_template='{"username": "{{identity.subject.username}}" }' > /dev/null
 
 vault write identity-delegation/role/test-role-2 \
+    key="custom-key" \
     ttl="2h" \
     actor_template='{"username": "{{identity.entity.id}}" }' \
     subject_template='{"username": "{{identity.subject.username}}" }' \
@@ -228,6 +279,7 @@ fi
 
 # Update role
 vault write identity-delegation/role/agent \
+    key="test-key" \
     ttl="3h" \
     context="urn:documents.service:read,urn:images.service:write" \
     actor_template='{"act": {"sub": "agent-123-updated"}}' \
@@ -250,7 +302,7 @@ echo "✓ Role CRUD operations work correctly"
 echo ""
 
 # Note about token exchange testing
-echo "Test 4: Token exchange..."
+echo "Test 6: Token exchange..."
 echo "Note: Full token exchange testing requires properly signed JWTs."
 echo "The Go tests (go test) cover JWT validation and exchange logic."
 echo ""
@@ -282,7 +334,10 @@ echo "=========================================="
 echo ""
 echo "Summary:"
 echo "  - Plugin configuration: PASS"
-echo "  - Security (key not exposed): PASS"
+echo "  - Security (config signing key not exposed): PASS"
+echo "  - Key management: PASS"
+echo "  - Security (private keys not exposed): PASS"
+echo "  - JWKS endpoint: PASS"
 echo "  - Role CRUD operations: PASS"
 echo "  - Cleanup: PASS"
 echo ""
