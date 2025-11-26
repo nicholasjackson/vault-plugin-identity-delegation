@@ -317,8 +317,30 @@ DELEGATE_TOKEN=$(
 echo "token: ${DELEGATE_TOKEN}"
 echo ""
 
+# Verify token has kid header
+TOKEN_HEADER=$(echo "${DELEGATE_TOKEN}" | cut -d. -f1 | base64 -d 2>/dev/null)
+if ! echo "${TOKEN_HEADER}" | jq -e '.kid' > /dev/null 2>&1; then
+    echo "❌ FAIL: Generated token missing kid header"
+    exit 1
+fi
+
+TOKEN_KID=$(echo "${TOKEN_HEADER}" | jq -r '.kid')
+echo "✓ Generated token has kid header: ${TOKEN_KID}"
+
+# Verify the kid matches the expected format (key-name-v1)
+if ! echo "${TOKEN_KID}" | grep -q "test-key-v1"; then
+    echo "❌ FAIL: Token kid does not match expected format"
+    exit 1
+fi
+
+echo "✓ Token kid matches expected key"
+echo ""
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 ${SCRIPT_DIR}/decode-jwt.py "${DELEGATE_TOKEN}"
+
+echo ""
+echo "✓ Token exchange completed successfully"
 
 # Cleanup
 #echo "Test 5: Cleanup..."
@@ -339,5 +361,7 @@ echo "  - Key management: PASS"
 echo "  - Security (private keys not exposed): PASS"
 echo "  - JWKS endpoint: PASS"
 echo "  - Role CRUD operations: PASS"
+echo "  - Token exchange: PASS"
+echo "  - Token kid header validation: PASS"
 echo "  - Cleanup: PASS"
 echo ""
