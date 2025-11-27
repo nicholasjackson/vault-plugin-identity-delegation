@@ -47,6 +47,9 @@ func NewBackend() *Backend {
 			pathRole(b),
 			pathRoleList(b),
 			pathToken(b),
+			pathKey(b),     // New: key CRUD
+			pathKeyList(b), // New: key listing
+			pathJWKS(b),    // New: JWKS endpoint
 		},
 
 		// Define paths that should be encrypted in storage
@@ -54,6 +57,10 @@ func NewBackend() *Backend {
 			SealWrapStorage: []string{
 				"config",  // Config contains signing keys
 				"roles/*", // Roles may contain sensitive templates
+				"keys/*",  // Named keys contain private keys (NEW)
+			},
+			Unauthenticated: []string{
+				"jwks",    // JWKS endpoint must be publicly accessible for JWT verification
 			},
 		},
 

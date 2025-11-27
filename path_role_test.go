@@ -12,6 +12,9 @@ import (
 func TestRoleWrite_Success(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	req := &logical.Request{
 		Operation: logical.CreateOperation,
 		Path:      "role/test-role",
@@ -19,6 +22,7 @@ func TestRoleWrite_Success(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+			"key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -74,6 +78,7 @@ func TestRoleWrite_MissingTemplate(t *testing.T) {
 		Data: map[string]any{
 			"name":    "test-role",
 			"ttl":     "1h",
+   "key":              "test-key",
 			"context": []string{"urn:documents:read"},
 			// Missing actor_template and subject_template
 		},
@@ -92,6 +97,9 @@ func TestRoleWrite_MissingTemplate(t *testing.T) {
 func TestRoleRead_Success(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Create role first
 	writeReq := &logical.Request{
 		Operation: logical.CreateOperation,
@@ -100,6 +108,7 @@ func TestRoleRead_Success(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -150,6 +159,9 @@ func TestRoleRead_NotFound(t *testing.T) {
 func TestRoleUpdate_Success(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Create role first
 	writeReq := &logical.Request{
 		Operation: logical.CreateOperation,
@@ -158,6 +170,7 @@ func TestRoleUpdate_Success(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -174,6 +187,7 @@ func TestRoleUpdate_Success(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "2h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-456", "name": "Updated Agent"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}", "role": "{{.identity.subject.role}}"}`,
 			"context":          []string{"urn:documents:read", "urn:documents:write"},
@@ -202,6 +216,9 @@ func TestRoleUpdate_Success(t *testing.T) {
 func TestRoleDelete_Success(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Create role first
 	writeReq := &logical.Request{
 		Operation: logical.CreateOperation,
@@ -210,6 +227,7 @@ func TestRoleDelete_Success(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-123"}}`,
 			"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 			"context":          []string{"urn:documents:read"},
@@ -239,6 +257,9 @@ func TestRoleDelete_Success(t *testing.T) {
 func TestRoleList_Success(t *testing.T) {
 	b, storage := getTestBackend(t)
 
+	// Create test key
+	createTestKey(t, b, storage, "test-key")
+
 	// Create multiple roles
 	roles := []string{"role-1", "role-2", "role-3"}
 	for _, roleName := range roles {
@@ -249,6 +270,7 @@ func TestRoleList_Success(t *testing.T) {
 			Data: map[string]any{
 				"name":             roleName,
 				"ttl":              "1h",
+    "key":              "test-key",
 				"actor_template":   `{"act": {"sub": "agent-123"}}`,
 				"subject_template": `{"department": "{{.identity.subject.department}}"}`,
 				"context":          []string{"urn:documents:read"},
@@ -292,4 +314,100 @@ func TestRoleList_Empty(t *testing.T) {
 
 	require.NoError(t, err, "List should not error")
 	require.Nil(t, resp, "Response should be nil when no roles exist")
+}
+
+// TestPathRoleWrite_WithKey tests creating a role with named key reference
+func TestPathRoleWrite_WithKey(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Create key first
+	keyReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "key/role-key",
+		Storage:   storage,
+		Data: map[string]any{
+			"algorithm": "RS256",
+		},
+	}
+	_, err := b.HandleRequest(context.Background(), keyReq)
+	require.NoError(t, err)
+
+	// Create role referencing key
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "test-role",
+			"ttl":              "1h",
+			"key":              "role-key", // Reference named key
+			"actor_template":   `{"act": {"sub": "test"}}`,
+			"subject_template": `{}`,
+			"context":          []string{"scope1"},
+		},
+	}
+
+	resp, err := b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+	require.Nil(t, resp)
+
+	// Read back and verify key field
+	readReq := &logical.Request{
+		Operation: logical.ReadOperation,
+		Path:      "role/test-role",
+		Storage:   storage,
+	}
+
+	resp, err = b.HandleRequest(context.Background(), readReq)
+	require.NoError(t, err)
+	require.Equal(t, "role-key", resp.Data["key"])
+}
+
+// TestPathRoleWrite_InvalidKey tests creating role with non-existent key
+func TestPathRoleWrite_InvalidKey(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/bad-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "bad-role",
+			"ttl":              "1h",
+			"key":              "nonexistent-key",
+			"actor_template":   `{}`,
+			"subject_template": `{}`,
+			"context":          []string{"scope1"},
+		},
+	}
+
+	resp, err := b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+	require.True(t, resp.IsError())
+	require.Contains(t, resp.Error().Error(), "not found")
+}
+
+// TestPathRoleWrite_MissingKey tests validation of required key field
+func TestPathRoleWrite_MissingKey(t *testing.T) {
+	b, storage := getTestBackend(t)
+
+	// Create role without key field
+	roleReq := &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/no-key-role",
+		Storage:   storage,
+		Data: map[string]any{
+			"name":             "no-key-role",
+			"ttl":              "1h",
+			// No "key" field
+			"actor_template":   `{}`,
+			"subject_template": `{}`,
+			"context":          []string{"scope1"},
+		},
+	}
+
+	resp, err := b.HandleRequest(context.Background(), roleReq)
+	require.NoError(t, err)
+	require.True(t, resp.IsError())
+	require.Contains(t, resp.Error().Error(), "key is required")
 }

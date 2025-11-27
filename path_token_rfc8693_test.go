@@ -16,7 +16,10 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 	b, storage := getTestBackend(t)
 
 	// Setup
-	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	privateKey, _ := generateTestKeyPair(t)
+
+	// Create test key with this private key
+	createTestKey(t, b, storage, "test-key")
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -27,9 +30,7 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":           "https://vault.example.com",
-			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":      privateKeyPEM,
-			"default_ttl":      "1h",
+			"subject_jwks_uri": jwksServer.URL,			"default_ttl":      "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -42,6 +43,7 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 		Data: map[string]any{
 			"name": "test-role",
 			"ttl":  "1h",
+   "key":              "test-key",
 			"actor_template": `{
 				"act": {"sub": "agent:{{identity.entity.id}}"},
 				"actor_metadata": {
@@ -86,8 +88,11 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 	require.NoError(t, err)
 
+	// Get public key from JWKS endpoint and verify signature
+	vaultPublicKey := getPublicKeyFromJWKS(t, b, storage, "test-key-v1")
+
 	claims := make(map[string]any)
-	err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+	err = parsedToken.Claims(vaultPublicKey, &claims)
 	require.NoError(t, err)
 
 	// RFC 8693 Required Standard Claims
@@ -166,7 +171,8 @@ func TestRFC8693_TokenStructure(t *testing.T) {
 func TestRFC8693_UserCentricSemantics(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	privateKey, _ := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key")
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -177,9 +183,7 @@ func TestRFC8693_UserCentricSemantics(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":           "https://vault.example.com",
-			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":      privateKeyPEM,
-			"default_ttl":      "1h",
+			"subject_jwks_uri": jwksServer.URL,			"default_ttl":      "1h",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), configReq)
@@ -192,6 +196,7 @@ func TestRFC8693_UserCentricSemantics(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent:{{identity.entity.id}}"}}`,
 			"subject_template": `{}`,
 			"context":          []string{"urn:documents:read"},
@@ -230,8 +235,11 @@ func TestRFC8693_UserCentricSemantics(t *testing.T) {
 	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 	require.NoError(t, err)
 
+	// Get public key from JWKS endpoint and verify signature
+	vaultPublicKey := getPublicKeyFromJWKS(t, b, storage, "test-key-v1")
+
 	claims := make(map[string]any)
-	err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+	err = parsedToken.Claims(vaultPublicKey, &claims)
 	require.NoError(t, err)
 
 	// Verify user-centric semantics
@@ -275,7 +283,8 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b, storage := getTestBackend(t)
 
-			privateKey, privateKeyPEM := generateTestKeyPair(t)
+			privateKey, _ := generateTestKeyPair(t)
+			createTestKey(t, b, storage, "test-key")
 			testKID := "test-key-1"
 			jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 			defer jwksServer.Close()
@@ -286,12 +295,10 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 				Storage:   storage,
 				Data: map[string]any{
 					"issuer":           "https://vault.example.com",
-					"subject_jwks_uri": jwksServer.URL,
-					"signing_key":      privateKeyPEM,
-					"default_ttl":      "1h",
-				},
-			}
-			_, err := b.HandleRequest(context.Background(), configReq)
+					"subject_jwks_uri": jwksServer.URL,					"default_ttl":      "1h",
+							},
+		}
+		_, err := b.HandleRequest(context.Background(), configReq)
 			require.NoError(t, err)
 
 			roleReq := &logical.Request{
@@ -301,6 +308,7 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 				Data: map[string]any{
 					"name":             "test-role",
 					"ttl":              "1h",
+     "key":              "test-key",
 					"actor_template":   `{"act": {"sub": "agent"}}`,
 					"subject_template": `{}`,
 					"context":          tc.contextInput,
@@ -336,8 +344,11 @@ func TestRFC8693_ScopeFormat(t *testing.T) {
 			parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 			require.NoError(t, err)
 
+			// Get public key from JWKS endpoint and verify signature
+			vaultPublicKey := getPublicKeyFromJWKS(t, b, storage, "test-key-v1")
+
 			claims := make(map[string]any)
-			err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+			err = parsedToken.Claims(vaultPublicKey, &claims)
 			require.NoError(t, err)
 
 			// Verify scope format

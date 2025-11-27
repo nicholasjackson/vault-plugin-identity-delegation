@@ -90,7 +90,6 @@ func TestConfigWrite_Success(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":           "https://vault.example.com",
-			"signing_key":      testRSAPrivateKey,
 			"default_ttl":      "24h",
 			"subject_jwks_uri": "https://vault.example.com/.well-known/jwks.json",
 		},
@@ -116,7 +115,6 @@ func TestConfigWrite_MissingIssuer(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"signing_key": testRSAPrivateKey,
 			"default_ttl": "24h",
 			// Missing issuer
 		},
@@ -141,7 +139,6 @@ func TestConfigRead_AfterWrite(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":           "https://vault.example.com",
-			"signing_key":      testRSAPrivateKey,
 			"default_ttl":      "24h",
 			"subject_jwks_uri": "https://vault.example.com/.well-known/jwks.json",
 		},
@@ -163,8 +160,6 @@ func TestConfigRead_AfterWrite(t *testing.T) {
 	require.Equal(t, "https://vault.example.com", resp.Data["issuer"])
 	require.Equal(t, "24h0m0s", resp.Data["default_ttl"])
 	require.Equal(t, "https://vault.example.com/.well-known/jwks.json", resp.Data["subject_jwks_uri"])
-	// Note: signing_key should not be returned (sensitive)
-	require.NotContains(t, resp.Data, "signing_key", "Should not return signing key")
 }
 
 // TestConfigDelete tests deleting configuration
@@ -177,9 +172,9 @@ func TestConfigDelete(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":      "https://vault.example.com",
-			"signing_key": testRSAPrivateKey,
-			"default_ttl": "24h",
+			"issuer":           "https://vault.example.com",
+			"default_ttl":      "24h",
+			"subject_jwks_uri": "https://vault.example.com/.well-known/jwks.json",
 		},
 	}
 	_, err := b.HandleRequest(context.Background(), writeReq)

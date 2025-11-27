@@ -14,7 +14,8 @@ import (
 func TestContextMapsToScope(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	privateKey, _ := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key")
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -26,11 +27,10 @@ func TestContextMapsToScope(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":           "https://vault.example.com",
-			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":      privateKeyPEM,
-			"default_ttl":      "1h",
+			"subject_jwks_uri": jwksServer.URL,			"default_ttl":      "1h",
 		},
 	}
+
 	_, err := b.HandleRequest(context.Background(), configReq)
 	require.NoError(t, err)
 
@@ -42,6 +42,7 @@ func TestContextMapsToScope(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent"}}`,
 			"subject_template": `{}`,
 			"context":          []string{"urn:scope1", "urn:scope2", "urn:scope3"},
@@ -80,8 +81,11 @@ func TestContextMapsToScope(t *testing.T) {
 	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 	require.NoError(t, err)
 
+	// Get public key from JWKS endpoint and verify signature
+	vaultPublicKey := getPublicKeyFromJWKS(t, b, storage, "test-key-v1")
+
 	claims := make(map[string]any)
-	err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+	err = parsedToken.Claims(vaultPublicKey, &claims)
 	require.NoError(t, err)
 
 	// Verify scope exists and is space-delimited
@@ -95,7 +99,8 @@ func TestContextMapsToScope(t *testing.T) {
 func TestContextToScopeEndToEnd(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	privateKey, _ := generateTestKeyPair(t)
+	createTestKey(t, b, storage, "test-key")
 	testKID := "test-key-1"
 	jwksServer := createMockJWKSServer(t, &privateKey.PublicKey, testKID)
 	defer jwksServer.Close()
@@ -107,11 +112,10 @@ func TestContextToScopeEndToEnd(t *testing.T) {
 		Storage:   storage,
 		Data: map[string]any{
 			"issuer":           "https://vault.example.com",
-			"subject_jwks_uri": jwksServer.URL,
-			"signing_key":      privateKeyPEM,
-			"default_ttl":      "1h",
+			"subject_jwks_uri": jwksServer.URL,			"default_ttl":      "1h",
 		},
 	}
+
 	_, err := b.HandleRequest(context.Background(), configReq)
 	require.NoError(t, err, "Config should be created")
 
@@ -123,6 +127,7 @@ func TestContextToScopeEndToEnd(t *testing.T) {
 		Data: map[string]any{
 			"name":             "test-role",
 			"ttl":              "1h",
+   "key":              "test-key",
 			"actor_template":   `{"act": {"sub": "agent-id"}}`,
 			"subject_template": `{}`,
 			"context":          []string{"urn:docs:read", "urn:docs:write", "urn:images:delete"},
@@ -174,8 +179,11 @@ func TestContextToScopeEndToEnd(t *testing.T) {
 	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 	require.NoError(t, err)
 
+	// Get public key from JWKS endpoint and verify signature
+	vaultPublicKey := getPublicKeyFromJWKS(t, b, storage, "test-key-v1")
+
 	claims := make(map[string]any)
-	err = parsedToken.Claims(&privateKey.PublicKey, &claims)
+	err = parsedToken.Claims(vaultPublicKey, &claims)
 	require.NoError(t, err)
 
 	scope, ok := claims["scope"].(string)

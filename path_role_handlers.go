@@ -42,6 +42,7 @@ func (b *Backend) pathRoleRead(ctx context.Context, req *logical.Request, data *
 			"actor_template":   role.ActorTemplate,
 			"subject_template": role.SubjectTemplate,
 			"context":          role.Context,
+			"key":              role.Key, // NEW: include key reference
 		},
 	}, nil
 }
@@ -90,6 +91,24 @@ func (b *Backend) pathRoleWrite(ctx context.Context, req *logical.Request, data 
 	if issuer, ok := data.GetOk("bound_issuer"); ok {
 		role.BoundIssuer = issuer.(string)
 	}
+
+	// Get key reference (required) - NEW
+	keyName, ok := data.GetOk("key")
+	if !ok {
+		return logical.ErrorResponse("key is required"), nil
+	}
+	keyNameStr := keyName.(string)
+
+	// Validate key exists
+	key, err := b.getKey(ctx, req.Storage, keyNameStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate key: %w", err)
+	}
+	if key == nil {
+		return logical.ErrorResponse("key %q not found", keyNameStr), nil
+	}
+
+	role.Key = keyNameStr
 
 	// Store role
 	entry, err := logical.StorageEntryJSON(roleStoragePrefix+name, role)

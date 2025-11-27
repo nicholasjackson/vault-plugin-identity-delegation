@@ -40,7 +40,7 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 		return logical.ErrorResponse("role %q not found", roleName), nil
 	}
 
-	// Load config
+	// Load config (needed for issuer and subject_jwks_uri)
 	config, err := b.getConfig(ctx, req.Storage)
 	if err != nil {
 		return nil, err
@@ -49,10 +49,34 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 		return logical.ErrorResponse("plugin not configured"), nil
 	}
 
-	// Parse signing key
-	signingKey, err := parsePrivateKey(config.SigningKey)
+	// Load role-specified key (required)
+	key, err := b.getKey(ctx, req.Storage, role.Key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load key %q: %w", role.Key, err)
+	}
+	if key == nil {
+		return logical.ErrorResponse("key %q not found", role.Key), nil
+	}
+
+	// Parse private key
+	signingKey, err := parsePrivateKey(key.PrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse signing key: %w", err)
+	}
+
+	keyID := key.KeyID
+
+	// Map algorithm string to jose constant
+	var algorithm jose.SignatureAlgorithm
+	switch key.Algorithm {
+	case AlgorithmRS256:
+		algorithm = jose.RS256
+	case AlgorithmRS384:
+		algorithm = jose.RS384
+	case AlgorithmRS512:
+		algorithm = jose.RS512
+	default:
+		return nil, fmt.Errorf("unsupported algorithm: %s", key.Algorithm)
 	}
 
 	// Validate and parse subject token
@@ -111,8 +135,8 @@ func (b *Backend) pathTokenExchange(ctx context.Context, req *logical.Request, d
 		return nil, fmt.Errorf("failed to process template: %w", err)
 	}
 
-	// Generate new token
-	newToken, err := generateToken(config, role, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey, req.EntityID)
+	// Generate new token with keyID
+	newToken, err := generateToken(config, role, originalSubjectClaims["sub"].(string), actorClaims, subjectClaims, signingKey, keyID, algorithm, req.EntityID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -332,11 +356,17 @@ func processTemplate(template string, claims map[string]any) (map[string]any, er
 }
 
 // generateToken generates a new JWT with the merged claims
-func generateToken(config *Config, role *Role, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey, entityID string) (string, error) {
-	// Create signer
+func generateToken(config *Config, role *Role, subjectID string, actorClaims, subjectClaims map[string]any, signingKey *rsa.PrivateKey, keyID string, algorithm jose.SignatureAlgorithm, entityID string) (string, error) {
+	// Create signer with kid in header
+	signerOpts := (&jose.SignerOptions{}).WithType("JWT")
+
+	if keyID != "" {
+		signerOpts = signerOpts.WithHeader("kid", keyID) // NEW: include kid
+	}
+
 	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: jose.RS256, Key: signingKey},
-		(&jose.SignerOptions{}).WithType("JWT"),
+		jose.SigningKey{Algorithm: algorithm, Key: signingKey}, // Use role's algorithm
+		signerOpts,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create signer: %w", err)
