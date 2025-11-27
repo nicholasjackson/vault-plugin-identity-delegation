@@ -28,13 +28,6 @@ func pathKey(b *Backend) *framework.Path {
 				Description: "RSA key size in bits (2048, 3072, or 4096)",
 				Default:     DefaultKeySize,
 			},
-			"private_key": {
-				Type:        framework.TypeString,
-				Description: "Optional: Provide your own PEM-encoded RSA private key. If not provided, a key will be generated.",
-				DisplayAttrs: &framework.DisplayAttributes{
-					Sensitive: true,
-				},
-			},
 		},
 
 		Operations: map[logical.Operation]framework.OperationHandler{
@@ -57,7 +50,7 @@ func pathKey(b *Backend) *framework.Path {
 		},
 
 		HelpSynopsis:    "Manage named signing keys for token generation",
-		HelpDescription: "Create, read, and delete RSA signing keys. Keys can be auto-generated or provided. The private key is never returned in read operations.",
+		HelpDescription: "Create, read, and delete RSA signing keys. Keys are automatically generated and securely stored. Private keys are never exposed via the API.",
 	}
 }
 

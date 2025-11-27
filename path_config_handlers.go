@@ -35,7 +35,6 @@ func (b *Backend) pathConfigRead(ctx context.Context, req *logical.Request, data
 			"issuer":           config.Issuer,
 			"default_ttl":      config.DefaultTTL.String(),
 			"subject_jwks_uri": config.SubjectJWKSURI,
-			// Note: Do NOT return signing_key (sensitive)
 		},
 	}, nil
 }
@@ -50,16 +49,6 @@ func (b *Backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 		return logical.ErrorResponse("issuer is required"), nil
 	}
 	config.Issuer = issuer.(string)
-
-	// Get signing key (required)
-	signingKey, ok := data.GetOk("signing_key")
-	if !ok {
-		return logical.ErrorResponse("signing_key is required"), nil
-	}
-	config.SigningKey = signingKey.(string)
-
-	// Validate signing key is valid PEM
-	// (TODO: Add actual PEM validation in future - keep simple for scaffold)
 
 	// Get default TTL (optional, has default)
 	if ttl, ok := data.GetOk("default_ttl"); ok {

@@ -81,29 +81,18 @@ func (b *Backend) pathKeyWrite(ctx context.Context, req *logical.Request, data *
 		return logical.ErrorResponse("algorithm must be RS256, RS384, or RS512"), nil
 	}
 
-	// Get or generate private key
-	var privateKeyPEM string
-	if providedKey, ok := data.GetOk("private_key"); ok {
-		// User provided key - validate it
-		privateKeyPEM = providedKey.(string)
-		_, err := parsePrivateKey(privateKeyPEM)
-		if err != nil {
-			return logical.ErrorResponse("invalid private_key: %v", err), nil
-		}
-	} else {
-		// Generate new key
-		keySize := data.Get("key_size").(int)
-		if keySize != 2048 && keySize != 3072 && keySize != 4096 {
-			return logical.ErrorResponse("key_size must be 2048, 3072, or 4096"), nil
-		}
-
-		privateKey, err := generateRSAKey(keySize)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate RSA key: %w", err)
-		}
-
-		privateKeyPEM = encodePrivateKeyPEM(privateKey)
+	// Generate new key
+	keySize := data.Get("key_size").(int)
+	if keySize != 2048 && keySize != 3072 && keySize != 4096 {
+		return logical.ErrorResponse("key_size must be 2048, 3072, or 4096"), nil
 	}
+
+	privateKey, err := generateRSAKey(keySize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+
+	privateKeyPEM := encodePrivateKeyPEM(privateKey)
 
 	// Create key object
 	now := time.Now()

@@ -59,6 +59,9 @@ func NewBackend() *Backend {
 				"roles/*", // Roles may contain sensitive templates
 				"keys/*",  // Named keys contain private keys (NEW)
 			},
+			Unauthenticated: []string{
+				"jwks",    // JWKS endpoint must be publicly accessible for JWT verification
+			},
 		},
 
 		// Secrets: Not used for this plugin (generates tokens, doesn't manage secrets)

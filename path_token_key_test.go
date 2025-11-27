@@ -15,26 +15,27 @@ import (
 func TestPathTokenExchange_WithNamedKey(t *testing.T) {
 	b, storage := getTestBackend(t)
 
-	// Setup: Create key
-	privateKey, privateKeyPEM := generateTestKeyPair(t)
+	// Setup: Create key pair for subject token signing (test only)
+	subjectPrivateKey, _ := generateTestKeyPair(t)
+	subjectKID := "subject-key-1"
 
+	// Setup: Create Vault key for signing output tokens (auto-generated)
 	keyReq := &logical.Request{
 		Operation: logical.CreateOperation,
 		Path:      "key/token-key",
 		Storage:   storage,
 		Data: map[string]any{
-			"algorithm":   "RS256",
-			"private_key": privateKeyPEM,
+			"algorithm": "RS256",
 		},
 	}
 	keyResp, err := b.HandleRequest(context.Background(), keyReq)
 	require.NoError(t, err)
 
-	keyID := keyResp.Data["key_id"].(string) // e.g., "token-key-v1"
+	vaultKeyID := keyResp.Data["key_id"].(string) // e.g., "token-key-v1"
 
 	// Setup: Create JWKS server for subject token validation
-	publicKey := &privateKey.PublicKey
-	jwksServer := createMockJWKSServer(t, publicKey, keyID)
+	publicKey := &subjectPrivateKey.PublicKey
+	jwksServer := createMockJWKSServer(t, publicKey, subjectKID)
 	defer jwksServer.Close()
 
 	// Setup: Create config (using named keys, so signing_key is optional)
@@ -44,9 +45,7 @@ func TestPathTokenExchange_WithNamedKey(t *testing.T) {
 		Path:      "config",
 		Storage:   storage,
 		Data: map[string]any{
-			"issuer":           "https://vault.example.com",
-			"signing_key":      privateKeyPEM, // Still needed for config validation
-			"subject_jwks_uri": jwksServer.URL,
+			"issuer":           "https://vault.example.com",			"subject_jwks_uri": jwksServer.URL,
 			"default_ttl":      "1h",
 		},
 	}
@@ -80,8 +79,8 @@ func TestPathTokenExchange_WithNamedKey(t *testing.T) {
 	}
 
 	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: jose.RS256, Key: privateKey},
-		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", keyID),
+		jose.SigningKey{Algorithm: jose.RS256, Key: subjectPrivateKey},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", subjectKID),
 	)
 	require.NoError(t, err)
 
@@ -110,15 +109,17 @@ func TestPathTokenExchange_WithNamedKey(t *testing.T) {
 	parsedToken, err := jwt.ParseSigned(generatedToken, []jose.SignatureAlgorithm{jose.RS256})
 	require.NoError(t, err)
 
-	// Verify kid in header
-	require.Equal(t, keyID, parsedToken.Headers[0].KeyID, "JWT should include kid header")
+	// Verify kid in header (should be Vault's key ID, not subject key ID)
+	require.Equal(t, vaultKeyID, parsedToken.Headers[0].KeyID, "JWT should include kid header from Vault key")
 
-	// Verify signature with public key
-	claims := make(map[string]any)
-	err = parsedToken.Claims(publicKey, &claims)
-	require.NoError(t, err)
+	// Get public key from JWKS endpoint and verify signature
+	vaultPublicKey := getPublicKeyFromJWKS(t, b, storage, vaultKeyID)
 
 	// Verify claims
+	claims := make(map[string]any)
+	err = parsedToken.Claims(vaultPublicKey, &claims)
+	require.NoError(t, err, "Should be able to verify signature with public key from JWKS")
+
 	require.Equal(t, "https://vault.example.com", claims["iss"])
 	require.Equal(t, "user123", claims["sub"])
 	require.Contains(t, claims, "act")
@@ -132,15 +133,12 @@ func TestPathTokenExchange_RS384(t *testing.T) {
 	b, storage := getTestBackend(t)
 
 	// Create RS384 key
-	_, privateKeyPEM := generateTestKeyPair(t)
-
 	keyReq := &logical.Request{
 		Operation: logical.CreateOperation,
 		Path:      "key/rs384-key",
 		Storage:   storage,
 		Data: map[string]any{
-			"algorithm":   "RS384",
-			"private_key": privateKeyPEM,
+			"algorithm": "RS384",
 		},
 	}
 	keyResp, err := b.HandleRequest(context.Background(), keyReq)

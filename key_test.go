@@ -30,29 +30,6 @@ func TestPathKeyWrite_AutoGenerate(t *testing.T) {
 	require.Equal(t, 1, resp.Data["version"])
 }
 
-func TestPathKeyWrite_ProvidedKey(t *testing.T) {
-	// Test with user-provided private key
-	b, storage := getTestBackend(t)
-
-	privateKey, privateKeyPEM := generateTestKeyPair(t)
-	_ = privateKey // Use privateKey to avoid unused variable warning
-
-	req := &logical.Request{
-		Operation: logical.CreateOperation,
-		Path:      "key/custom-key",
-		Storage:   storage,
-		Data: map[string]any{
-			"algorithm":   "RS256",
-			"private_key": privateKeyPEM,
-		},
-	}
-
-	resp, err := b.HandleRequest(context.Background(), req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.Equal(t, "custom-key-v1", resp.Data["key_id"])
-}
-
 func TestPathKeyWrite_InvalidAlgorithm(t *testing.T) {
 	// Negative test: invalid algorithm
 	b, storage := getTestBackend(t)

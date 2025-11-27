@@ -176,23 +176,20 @@ echo ""
 
 # Configure plugin
 echo "Test 2: Configure plugin..."
-PRIVATE_KEY=$(cat "$PRIVATE_KEY_FILE")
 
 vault write identity-delegation/config \
     issuer="https://vault.example.com" \
-    signing_key="$PRIVATE_KEY" \
     subject_jwks_uri="http://127.0.0.1:8200/v1/identity/oidc/.well-known/keys" \
     default_ttl="1h" > /dev/null
 
-# Read config (should not show signing key)
+# Read config
 CONFIG_OUTPUT=$(vault read -format=json identity-delegation/config)
-if echo "$CONFIG_OUTPUT" | grep -q "signing_key"; then
-    echo "❌ FAIL: Config read returned signing key (security issue)"
+if ! echo "$CONFIG_OUTPUT" | jq -e '.data.issuer' > /dev/null; then
+    echo "❌ FAIL: Config read failed"
     exit 1
 fi
 
 echo "✓ Plugin configured correctly"
-echo "✓ Signing key not exposed in read operation"
 echo ""
 
 # Create signing keys
@@ -202,10 +199,10 @@ echo "Test 3: Create and manage signing keys..."
 vault write identity-delegation/key/test-key \
     algorithm="RS256" > /dev/null
 
-# Create key with provided private key
-vault write identity-delegation/key/custom-key \
+# Create a second key for multi-key testing
+vault write identity-delegation/key/test-key-2 \
     algorithm="RS256" \
-    private_key="$PRIVATE_KEY" > /dev/null
+    key_size="2048" > /dev/null
 
 # List keys
 KEY_LIST=$(vault list -format=json identity-delegation/key/)
@@ -255,7 +252,7 @@ vault write identity-delegation/role/test-role-1 \
     subject_template='{"username": "{{identity.subject.username}}" }' > /dev/null
 
 vault write identity-delegation/role/test-role-2 \
-    key="custom-key" \
+    key="test-key-2" \
     ttl="2h" \
     actor_template='{"username": "{{identity.entity.id}}" }' \
     subject_template='{"username": "{{identity.subject.username}}" }' \
@@ -356,7 +353,6 @@ echo "=========================================="
 echo ""
 echo "Summary:"
 echo "  - Plugin configuration: PASS"
-echo "  - Security (config signing key not exposed): PASS"
 echo "  - Key management: PASS"
 echo "  - Security (private keys not exposed): PASS"
 echo "  - JWKS endpoint: PASS"

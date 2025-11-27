@@ -203,16 +203,16 @@ See [draft-oauth-ai-agents-on-behalf-of-user](https://www.ietf.org/archive/id/dr
 ```bash
 vault write identity-delegation/config \
     issuer="https://vault.example.com" \
-    signing_key=@private_key.pem \
     subject_jwks_uri="http://127.0.0.1:8200/v1/identity/oidc/.well-known/keys" \
     default_ttl="24h"
 ```
 
 Configuration fields:
 - `issuer` - The issuer claim for generated tokens
-- `signing_key` - RSA private key (PEM format) for signing tokens (used for validating subject tokens)
 - `subject_jwks_uri` - JWKS endpoint for validating subject tokens
 - `default_ttl` - Default TTL for tokens if not specified in role
+
+**Note**: Signing keys are managed separately via the `/key` endpoint (see below). The config no longer contains a `signing_key` field.
 
 ### Manage Signing Keys
 
@@ -221,20 +221,15 @@ The plugin supports named key management for signing generated tokens. Each role
 #### Create a Signing Key
 
 ```bash
-# Auto-generate a new RSA key pair
-vault write identity-delegation/key/my-key \
-    algorithm="RS256"
-
-# Or provide your own private key
+# Generate a new RSA key pair
 vault write identity-delegation/key/my-key \
     algorithm="RS256" \
-    private_key=@my_private_key.pem
+    key_size="2048"
 ```
 
 Key parameters:
 - `algorithm` - Signing algorithm: `RS256`, `RS384`, or `RS512` (required)
-- `key_size` - RSA key size: `2048`, `3072`, or `4096` (default: 2048, only for auto-generated keys)
-- `private_key` - PEM-encoded RSA private key (optional, auto-generated if not provided)
+- `key_size` - RSA key size: `2048`, `3072`, or `4096` (default: 2048)
 
 #### List Keys
 

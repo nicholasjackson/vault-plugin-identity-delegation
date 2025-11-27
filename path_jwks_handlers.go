@@ -3,6 +3,7 @@ package tokenexchange
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math/big"
 
@@ -68,7 +69,19 @@ func (b *Backend) pathJWKSRead(ctx context.Context, req *logical.Request, data *
 
 	jwks["keys"] = keys
 
+	// For JWKS RFC 7517 compliance, return the keys array directly at the top level
+	// Not wrapped in Vault's standard response format
+	// Serialize JWKS to JSON bytes for HTTPRawBody
+	jwksJSON, err := json.Marshal(jwks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JWKS: %w", err)
+	}
+
 	return &logical.Response{
-		Data: jwks,
+		Data: map[string]any{
+			logical.HTTPContentType: "application/json",
+			logical.HTTPRawBody:     jwksJSON,
+			logical.HTTPStatusCode:  200,
+		},
 	}, nil
 }

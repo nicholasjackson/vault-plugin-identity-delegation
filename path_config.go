@@ -12,9 +12,6 @@ type Config struct {
 	// Issuer is the JWT issuer claim (iss) for generated tokens
 	Issuer string `json:"issuer"`
 
-	// SigningKey is the PEM-encoded private key for signing JWTs
-	SigningKey string `json:"signing_key"`
-
 	// DefaultTTL is the default time-to-live for generated tokens
 	DefaultTTL time.Duration `json:"default_ttl"`
 
@@ -37,14 +34,6 @@ func pathConfig(b *Backend) *framework.Path {
 				Type:        framework.TypeString,
 				Description: "The issuer (iss) claim for generated tokens",
 				Required:    true,
-			},
-			"signing_key": {
-				Type:        framework.TypeString,
-				Description: "PEM-encoded RSA private key for signing tokens",
-				Required:    true,
-				DisplayAttrs: &framework.DisplayAttributes{
-					Sensitive: true,
-				},
 			},
 			"default_ttl": {
 				Type:        framework.TypeDurationSecond,
@@ -78,6 +67,6 @@ func pathConfig(b *Backend) *framework.Path {
 		},
 
 		HelpSynopsis:    "Configure the token exchange plugin",
-		HelpDescription: "Configures the issuer, signing keys, and default TTL for token generation.",
+		HelpDescription: "Configures the issuer, subject token validation, and default TTL for token generation. Signing keys are managed separately via the /key endpoint.",
 	}
 }
