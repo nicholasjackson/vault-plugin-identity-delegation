@@ -214,6 +214,87 @@ vault write identity/entity-alias \
 
 echo "Entity alias created for customer-agent"
 
+# Create policy for weather-agent (can request delegated tokens and validate them)
+echo "Creating policy for weather-agent..."
+vault policy write weather-agent - <<EOF
+# Allow access to token exchange endpoint
+path "identity-delegation/token/*" {
+  capabilities = ["create", "update"]
+}
+
+# Allow reading roles
+path "identity-delegation/role/*" {
+  capabilities = ["read", "list"]
+}
+
+# Allow reading JWKS for token validation
+path "identity-delegation/jwks" {
+  capabilities = ["read"]
+}
+
+# Allow reading own identity
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+EOF
+
+echo "Policy created: weather-agent"
+
+# Create weather-agent service account and secret in Kubernetes
+echo "Creating weather-agent service account..."
+kubectl apply -f - <<EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weather-agent
+  namespace: demo
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: weather-agent-token
+  namespace: demo
+  annotations:
+    kubernetes.io/service-account.name: weather-agent
+type: kubernetes.io/service-account-token
+EOF
+
+echo "Waiting for weather-agent token to be created..."
+sleep 2
+
+# Create Kubernetes auth role for weather-agent
+echo "Creating Kubernetes auth role: weather-agent..."
+vault write auth/demo-auth-mount/role/weather-agent \
+  bound_service_account_names="weather-agent" \
+  bound_service_account_namespaces="demo" \
+  token_ttl="1h" \
+  token_policies="weather-agent"
+
+echo "Role created: weather-agent"
+echo "  - Bound Service Account: weather-agent"
+echo "  - Bound Namespace: demo"
+echo "  - Policies: weather-agent"
+echo "  - Token TTL: 1h"
+
+# Create Vault entity for weather-agent
+echo "Creating Vault entity for weather-agent..."
+WEATHER_AGENT_ENTITY_ID=$(vault write -format=json identity/entity \
+  name="weather-agent" \
+  metadata=type="ai-agent" \
+  metadata=service="weather" | jq -r '.data.id')
+
+echo "Weather agent entity created: ${WEATHER_AGENT_ENTITY_ID}"
+
+# Create entity alias linking k8s auth to entity
+echo "Creating entity alias for weather-agent..."
+vault write identity/entity-alias \
+  name="weather-agent" \
+  canonical_id="${WEATHER_AGENT_ENTITY_ID}" \
+  mount_accessor="${K8S_ACCESSOR}"
+
+echo "Entity alias created for weather-agent"
+
 # Create policy for customers-tool (can request delegated tokens and validate them)
 echo "Creating policy for customers-tool..."
 vault policy write customers-tool - <<EOF
@@ -321,6 +402,12 @@ echo "  - Role: customer-agent"
 echo "  - Service Account: customer-agent (namespace: demo)"
 echo "  - Policy: customer-agent (token exchange + JWKS validation)"
 echo "  - Entity: customer-agent"
+echo ""
+echo "Weather agent configured (token exchange and validation):"
+echo "  - Role: weather-agent"
+echo "  - Service Account: weather-agent (namespace: demo)"
+echo "  - Policy: weather-agent (token exchange + JWKS validation)"
+echo "  - Entity: weather-agent"
 echo ""
 echo "Customers tool configured (token exchange and validation):"
 echo "  - Role: customers-tool"

@@ -93,6 +93,19 @@ vault write identity-delegation/role/customer-agent \
 
 echo "Customer agent role created: customer-agent"
 
+# Create role for weather-agent (full weather data access)
+echo "Creating weather-agent role..."
+vault write identity-delegation/role/weather-agent \
+  key="demo-key" \
+  bound_issuer="http://keycloak.container.local.jmpd.in:8080/realms/demo" \
+  bound_audiences="account" \
+  context="read:weather,write:weather" \
+  ttl="1h" \
+  actor_template='{"act": {"sub": "{{identity.entity.name}}"}}' \
+  subject_template='{"email": "{{identity.subject.email}}", "name": "{{identity.subject.name}}", "permissions": {{identity.subject.permissions}}}'
+
+echo "Weather agent role created: weather-agent"
+
 # Create role for customers-tool (read-only)
 echo "Creating customers-tool role..."
 vault write identity-delegation/role/customers-tool \
@@ -143,6 +156,7 @@ echo ""
 echo "Plugin enabled at: ${VAULT_ADDR}/v1/identity-delegation"
 echo "Available roles:"
 echo "  - customer-agent (scope: read:customers, write:customers)"
+echo "  - weather-agent (scope: read:weather, write:weather)"
 echo "  - customers-tool (scope: read:customers)"
 echo "  - weather-tool (scope: read:weather)"
 echo ""

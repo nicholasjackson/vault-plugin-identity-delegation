@@ -30,3 +30,4 @@ Thumbs.db
 
 # Vault dev server data
 data/
+.kube

@@ -74,6 +74,32 @@ EOF
 
 echo "Policy created: customers-tool"
 
+# Create policy for weather-agent
+echo "Creating policy for weather-agent..."
+vault policy write weather-agent - <<EOF
+# Allow access to token exchange endpoint
+path "identity-delegation/token/*" {
+  capabilities = ["create", "update"]
+}
+
+# Allow reading roles
+path "identity-delegation/role/*" {
+  capabilities = ["read", "list"]
+}
+
+# Allow reading JWKS for token validation
+path "identity-delegation/jwks" {
+  capabilities = ["read"]
+}
+
+# Allow reading own identity
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+EOF
+
+echo "Policy created: weather-agent"
+
 # Create policy for weather-tool
 echo "Creating policy for weather-tool..."
 vault policy write weather-tool - <<EOF
@@ -111,6 +137,17 @@ vault write auth/approle/role/customer-agent \
 
 echo "AppRole role created: customer-agent"
 
+# Create AppRole role for weather-agent
+echo "Creating AppRole role: weather-agent..."
+vault write auth/approle/role/weather-agent \
+  token_policies="weather-agent" \
+  token_ttl="1h" \
+  token_max_ttl="4h" \
+  secret_id_ttl="24h" \
+  secret_id_num_uses=0
+
+echo "AppRole role created: weather-agent"
+
 # Create AppRole role for customers-tool
 echo "Creating AppRole role: customers-tool..."
 vault write auth/approle/role/customers-tool \
@@ -135,19 +172,23 @@ echo "AppRole role created: weather-tool"
 
 # Get the role IDs
 CUSTOMER_AGENT_ROLE_ID=$(vault read -format=json auth/approle/role/customer-agent/role-id | jq -r '.data.role_id')
+WEATHER_AGENT_ROLE_ID=$(vault read -format=json auth/approle/role/weather-agent/role-id | jq -r '.data.role_id')
 CUSTOMERS_TOOL_ROLE_ID=$(vault read -format=json auth/approle/role/customers-tool/role-id | jq -r '.data.role_id')
 WEATHER_TOOL_ROLE_ID=$(vault read -format=json auth/approle/role/weather-tool/role-id | jq -r '.data.role_id')
 
 echo "Customer agent role ID: ${CUSTOMER_AGENT_ROLE_ID}"
+echo "Weather agent role ID: ${WEATHER_AGENT_ROLE_ID}"
 echo "Customers tool role ID: ${CUSTOMERS_TOOL_ROLE_ID}"
 echo "Weather tool role ID: ${WEATHER_TOOL_ROLE_ID}"
 
 # Generate secret IDs
 CUSTOMER_AGENT_SECRET_ID=$(vault write -format=json -f auth/approle/role/customer-agent/secret-id | jq -r '.data.secret_id')
+WEATHER_AGENT_SECRET_ID=$(vault write -format=json -f auth/approle/role/weather-agent/secret-id | jq -r '.data.secret_id')
 CUSTOMERS_TOOL_SECRET_ID=$(vault write -format=json -f auth/approle/role/customers-tool/secret-id | jq -r '.data.secret_id')
 WEATHER_TOOL_SECRET_ID=$(vault write -format=json -f auth/approle/role/weather-tool/secret-id | jq -r '.data.secret_id')
 
 echo "Customer agent secret ID generated"
+echo "Weather agent secret ID generated"
 echo "Customers tool secret ID generated"
 echo "Weather tool secret ID generated"
 
@@ -160,6 +201,15 @@ CUSTOMER_AGENT_ENTITY_ID=$(vault write -format=json identity/entity \
   vault read -format=json identity/entity/name/customer-agent | jq -r '.data.id')
 
 echo "Customer agent entity: ${CUSTOMER_AGENT_ENTITY_ID}"
+
+echo "Creating Vault entity for weather-agent..."
+WEATHER_AGENT_ENTITY_ID=$(vault write -format=json identity/entity \
+  name="weather-agent" \
+  metadata=type="ai-agent" \
+  metadata=service="weather" 2>/dev/null | jq -r '.data.id' || \
+  vault read -format=json identity/entity/name/weather-agent | jq -r '.data.id')
+
+echo "Weather agent entity: ${WEATHER_AGENT_ENTITY_ID}"
 
 echo "Creating Vault entity for customers-tool..."
 CUSTOMERS_TOOL_ENTITY_ID=$(vault write -format=json identity/entity \
@@ -189,6 +239,12 @@ vault write identity/entity-alias \
   canonical_id="${CUSTOMER_AGENT_ENTITY_ID}" \
   mount_accessor="${APPROLE_ACCESSOR}" 2>/dev/null || echo "Entity alias may already exist"
 
+echo "Creating entity alias for weather-agent..."
+vault write identity/entity-alias \
+  name="${WEATHER_AGENT_ROLE_ID}" \
+  canonical_id="${WEATHER_AGENT_ENTITY_ID}" \
+  mount_accessor="${APPROLE_ACCESSOR}" 2>/dev/null || echo "Entity alias may already exist"
+
 echo "Creating entity alias for customers-tool..."
 vault write identity/entity-alias \
   name="${CUSTOMERS_TOOL_ROLE_ID}" \
@@ -212,6 +268,13 @@ echo "  - Role ID: ${CUSTOMER_AGENT_ROLE_ID}"
 echo "  - Secret ID: ${CUSTOMER_AGENT_SECRET_ID}"
 echo "  - Policy: customer-agent"
 echo "  - Entity: customer-agent"
+echo ""
+echo "Weather Agent AppRole:"
+echo "  - Role: weather-agent"
+echo "  - Role ID: ${WEATHER_AGENT_ROLE_ID}"
+echo "  - Secret ID: ${WEATHER_AGENT_SECRET_ID}"
+echo "  - Policy: weather-agent"
+echo "  - Entity: weather-agent"
 echo ""
 echo "Customers Tool AppRole:"
 echo "  - Role: customers-tool"

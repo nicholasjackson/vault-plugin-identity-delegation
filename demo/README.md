@@ -106,6 +106,7 @@ Both users have password: `password`
 | Entity | Type | Scope | Description |
 |--------|------|-------|-------------|
 | customer-agent | AI Agent | `read:customers write:customers` | AI agent that helps with customer service tasks |
+| weather-agent | AI Agent | `read:weather write:weather` | AI agent that helps with weather-related tasks |
 | customers-tool | Tool | `read:customers` | Database query tool for customer lookups (read-only) |
 | weather-tool | Tool | `read:weather` | Weather data retrieval tool (read-only) |
 
@@ -185,6 +186,7 @@ The demo configures Vault with:
 
 **Identity Delegation Roles:**
 - `customer-agent` — For customer data (scope: `read:customers`, `write:customers`)
+- `weather-agent` — For weather data (scope: `read:weather`, `write:weather`)
 - `customers-tool` — Read-only customer access (scope: `read:customers`)
 - `weather-tool` — Weather data access (scope: `read:weather`)
 
@@ -197,6 +199,7 @@ All roles include `permissions` from the user's Keycloak token in `subject_claim
 
 **Vault Entities (Agents/Tools):**
 - `customer-agent` — Customer service agent
+- `weather-agent` — Weather service agent
 - `customers-tool` — Customer lookup tool
 - `weather-tool` — Weather data retrieval tool
 
@@ -237,12 +240,19 @@ echo $JANE_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
 #### Using AppRole Auth
 
 ```bash
-# Get role ID and secret ID for customer-agent
+# Login as customer-agent
 export VAULT_ROLE_ID=$(vault read -format=json auth/approle/role/customer-agent/role-id | jq -r '.data.role_id')
 export VAULT_SECRET_ID=$(vault write -format=json -f auth/approle/role/customer-agent/secret-id | jq -r '.data.secret_id')
 
-# Login to Vault as customer-agent
-AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/approle/login" \
+CUSTOMER_AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/approle/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"role_id\": \"$VAULT_ROLE_ID\", \"secret_id\": \"$VAULT_SECRET_ID\"}" | jq -r '.auth.client_token')
+
+# Login as weather-agent
+export VAULT_ROLE_ID=$(vault read -format=json auth/approle/role/weather-agent/role-id | jq -r '.data.role_id')
+export VAULT_SECRET_ID=$(vault write -format=json -f auth/approle/role/weather-agent/secret-id | jq -r '.data.secret_id')
+
+WEATHER_AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/approle/login" \
   -H "Content-Type: application/json" \
   -d "{\"role_id\": \"$VAULT_ROLE_ID\", \"secret_id\": \"$VAULT_SECRET_ID\"}" | jq -r '.auth.client_token')
 ```
@@ -250,34 +260,40 @@ AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth
 #### Using Kubernetes Auth
 
 ```bash
-# Get service account token from K8s secret
+# Login as customer-agent
 SA_TOKEN=$(kubectl get secret customer-agent-token -n demo -o jsonpath='{.data.token}' | base64 -d)
 
-# Login to Vault using K8s auth
-AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/demo-auth-mount/login" \
+CUSTOMER_AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/demo-auth-mount/login" \
   -H "Content-Type: application/json" \
   -d "{\"role\": \"customer-agent\", \"jwt\": \"$SA_TOKEN\"}" | jq -r '.auth.client_token')
+
+# Login as weather-agent
+SA_TOKEN=$(kubectl get secret weather-agent-token -n demo -o jsonpath='{.data.token}' | base64 -d)
+
+WEATHER_AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/demo-auth-mount/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"role\": \"weather-agent\", \"jwt\": \"$SA_TOKEN\"}" | jq -r '.auth.client_token')
 ```
 
 ### Step 3: Exchange Tokens
 
 ```bash
-# Exchange John's token (should produce token with customer permissions)
+# Exchange John's token via customer-agent (scope ∩ permissions = read:customers, write:customers)
 JOHN_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/customer-agent" \
-  -H "X-Vault-Token: $AGENT_TOKEN" \
+  -H "X-Vault-Token: $CUSTOMER_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"subject_token\": \"$JOHN_TOKEN\"}" | jq -r '.data.token')
 
-echo "=== John's delegated token ==="
+echo "=== John via customer-agent ==="
 echo $JOHN_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
 
-# Exchange Jane's token (permissions won't match customer scope)
-JANE_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/customer-agent" \
-  -H "X-Vault-Token: $AGENT_TOKEN" \
+# Exchange Jane's token via weather-agent (scope ∩ permissions = read:weather)
+JANE_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/weather-agent" \
+  -H "X-Vault-Token: $WEATHER_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"subject_token\": \"$JANE_TOKEN\"}" | jq -r '.data.token')
 
-echo "=== Jane's delegated token ==="
+echo "=== Jane via weather-agent ==="
 echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
 ```
 
@@ -286,13 +302,17 @@ echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
 Compare the `scope` and `subject_claims.permissions` in each token:
 
 ```bash
-# John's token: scope and permissions intersect -> ALLOWED
-echo "John's effective permissions:"
-echo $JOHN_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, permissions: .subject_claims.permissions}'
+# John via customer-agent: scope={read:customers,write:customers} ∩ permissions={read:customers,write:customers} -> ALLOWED
+echo "John via customer-agent:"
+echo $JOHN_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, permissions: .subject_claims.permissions}'
 
-# Jane's token: scope and permissions don't intersect -> DENIED
-echo "Jane's effective permissions:"
-echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, permissions: .subject_claims.permissions}'
+# Jane via weather-agent: scope={read:weather,write:weather} ∩ permissions={read:marketing,write:marketing,read:weather} -> read:weather only
+echo "Jane via weather-agent:"
+echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, permissions: .subject_claims.permissions}'
+
+# Jane via customer-agent: scope={read:customers,write:customers} ∩ permissions={read:marketing,write:marketing,read:weather} -> empty (DENIED)
+echo "Jane via customer-agent:"
+echo $JANE_CUSTOMER_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, permissions: .subject_claims.permissions}'
 ```
 
 ### Test customers-tool (Read-Only)
@@ -475,8 +495,10 @@ curl http://keycloak.container.local.jmpd.in:8080/health/ready
 │  - identity-    │     ┌──────┴──────────┐
 │    delegation   │     │ Service Accounts│
 │                 │     │ - customer-agent│
-│  Roles:         │     │ - customers-tool│
-│  - customer-    │     └─────────────────┘
+│  Roles:         │     │ - weather-agent │
+│  - customer-    │     │ - customers-tool│
+│    agent        │     └─────────────────┘
+│  - weather-     │
 │    agent        │
 │  - customers-   │
 │    tool         │
@@ -498,6 +520,7 @@ curl http://keycloak.container.local.jmpd.in:8080/health/ready
 | Role | Scope | Use Case |
 |------|-------|----------|
 | `customer-agent` | `read:customers`, `write:customers` | Full customer data access |
+| `weather-agent` | `read:weather`, `write:weather` | Full weather data access |
 | `customers-tool` | `read:customers` | Read-only customer lookup |
 | `weather-tool` | `read:weather` | Weather data retrieval |
 
@@ -505,9 +528,9 @@ curl http://keycloak.container.local.jmpd.in:8080/health/ready
 
 | Auth Method | Path | Roles | Entity |
 |-------------|------|-------|--------|
-| kubernetes | `auth/kubernetes` | customer-agent, customers-tool | Same as role |
-| kubernetes | `auth/demo-auth-mount` | customer-agent, customers-tool | Same as role |
-| approle | `auth/approle` | customer-agent, customers-tool, weather-tool | Same as role |
+| kubernetes | `auth/kubernetes` | customer-agent, weather-agent, customers-tool | Same as role |
+| kubernetes | `auth/demo-auth-mount` | customer-agent, weather-agent, customers-tool | Same as role |
+| approle | `auth/approle` | customer-agent, weather-agent, customers-tool, weather-tool | Same as role |
 
 ### Keycloak Test Users
 
