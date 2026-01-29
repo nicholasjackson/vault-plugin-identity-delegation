@@ -1,4 +1,4 @@
-.PHONY: build build-all test lint clean dev-vault register enable demo help
+.PHONY: build build-all test lint clean dev-vault register enable demo help demo-build demo-up demo-down
 
 # Binary name
 BINARY=vault-plugin-identity-delegation
@@ -133,3 +133,22 @@ demo: ## Run a demo of the plugin (requires enabled plugin)
 
 all: clean lint test build ## Run all checks and build
 	@echo "✓ All tasks completed successfully"
+
+# Demo environment targets
+DEMO_BUILD_DIR=./demo/build
+
+demo-build: ## Build plugin for demo environment
+	@echo "Building plugin for demo..."
+	@mkdir -p $(DEMO_BUILD_DIR)
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(DEMO_BUILD_DIR)/$(BINARY) cmd/vault-plugin-identity-delegation/main.go
+	@echo "✓ Binary built: $(DEMO_BUILD_DIR)/$(BINARY)"
+
+demo-up: demo-build ## Build plugin and start demo environment with Jumppad
+	@echo "Starting demo environment..."
+	@cd demo && jumppad up
+	@echo "✓ Demo environment running"
+
+demo-down: ## Stop demo environment
+	@echo "Stopping demo environment..."
+	@cd demo && jumppad down
+	@echo "✓ Demo environment stopped"

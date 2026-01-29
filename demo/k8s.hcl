@@ -1,73 +1,82 @@
-# Kubernetes cluster for testing Vault operator integration
-# This cluster uses the Vault operator helm chart to connect to the standalone
-# Vault container running at 10.10.0.30:8200
+# Kubernetes cluster and Vault Secrets Operator setup
 
-resource "k8s_cluster" "demo" {
+resource "k8s_cluster" "k3s" {
   network {
     id = resource.network.demo.meta.id
   }
-
-  depends_on = ["resource.container.vault"]
 }
 
-# Helm chart for Vault operator
-# Configures the Vault agent injector to connect to the external Vault server
-resource "helm" "vault_operator" {
-  cluster = resource.k8s_cluster.demo
+resource "helm" "vault_secrets_operator" {
+  cluster = resource.k8s_cluster.k3s
 
   repository {
     name = "hashicorp"
     url  = "https://helm.releases.hashicorp.com"
   }
 
-  chart   = "hashicorp/vault-secrets-operator"
-  version = "1.0.1"
+  chart            = "hashicorp/vault-secrets-operator"
+  version          = "0.10.0"
+  namespace        = "vault-secrets-operator"
+  create_namespace = true
+
+  values_string = {
+    "defaultVaultConnection.enabled" = "true"
+    "defaultVaultConnection.address" = "http://vault.container.local.jmpd.in:8200"
+  }
 
   health_check {
     timeout = "120s"
-    pods    = ["app.kubernetes.io/instance=vault-operator"]
+    pods    = ["app.kubernetes.io/name=vault-secrets-operator"]
   }
 }
 
-# Configure Kubernetes authentication in Vault
-# This creates the necessary service accounts and configures the auth method
+# Configure Vault Kubernetes auth at demo-auth-mount path
 resource "exec" "configure_k8s_auth" {
-  disabled = !variable.run_scripts
-
-  depends_on = [
-    "resource.helm.vault_operator",
-    "resource.container.vault"
-  ]
+  disabled   = !variable.run_scripts
+  depends_on = ["resource.helm.vault_secrets_operator", "resource.exec.configure_vault"]
 
   script = file("./scripts/setup-k8s-auth.sh")
 
   environment = {
-    KUBECONFIG  = resource.k8s_cluster.demo.kube_config.path
     VAULT_ADDR  = "http://localhost:8200"
     VAULT_TOKEN = "root"
+    KUBECONFIG  = resource.k8s_cluster.k3s.kube_config.path
   }
 }
 
-# Apply the VaultAuth and VaultStaticSecret resources
-resource "k8s_config" "vault_auth" {
-  disabled = !variable.run_scripts
+# Configure Vault Kubernetes auth at kubernetes/ path
+resource "exec" "configure_vault_k8s" {
+  disabled   = !variable.run_scripts
+  depends_on = ["resource.helm.vault_secrets_operator", "resource.exec.configure_vault"]
 
-  depends_on = ["resource.exec.configure_k8s_auth"]
+  script = file("./scripts/setup-vault-k8s.sh")
 
-  cluster = resource.k8s_cluster.demo
-
-  paths = [
-    "./vso/auth.yaml"
-  ]
-
-  wait_until_ready = true
+  environment = {
+    VAULT_ADDR  = "http://localhost:8200"
+    VAULT_TOKEN = "root"
+    KUBECONFIG  = resource.k8s_cluster.k3s.kube_config.path
+    K8S_HOST    = "https://server.${resource.k8s_cluster.k3s.meta.id}.k8s-cluster.shipyard.run:6443"
+  }
 }
 
-# Output Kubernetes configuration
+resource "ingress" "chat_ui" {
+  port = 3001
+
+  target {
+    resource = resource.k8s_cluster.k3s
+    port     = 80
+
+    config = {
+      service   = "chat-ui"
+      namespace = "demo"
+    }
+  }
+}
+
 output "KUBECONFIG" {
-  value = resource.k8s_cluster.demo.kube_config.path
+  value = resource.k8s_cluster.k3s.kube_config.path
 }
 
-output "K8S_VAULT_ADDR" {
-  value = "Vault accessible from K8s at: http://10.10.0.30:8200"
+output "CHAT_UI_URL" {
+  value = "http://localhost:3001"
 }

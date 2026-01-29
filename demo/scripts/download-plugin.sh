@@ -2,14 +2,14 @@
 set -e
 
 # Check if plugin already exists
-if [ -f ./build/vault-plugin-identity-delegation ]; then
-  echo "Plugin binary already exists at ./build/vault-plugin-identity-delegation"
+if [ -f ../bin/vault-plugin-identity-delegation ]; then
+  echo "Plugin binary already exists at ../bin/vault-plugin-identity-delegation"
   echo "Skipping download. Delete the file to re-download."
   exit 0
 fi
 
 CURRENT_DIR=$(dirname "$0")
-PLUGIN_DIR="${CURRENT_DIR}/../build"
+PLUGIN_DIR="${CURRENT_DIR}/../bin"
 
 
 echo "Downloading vault-plugin-identity-delegation ${PLUGIN_VERSION} for ${PLUGIN_PLATFORM}..."
@@ -34,7 +34,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Make executable
-chmod +x ${PLUGIN_DIR}/vault-plugin-token-exchange
+chmod +x ${PLUGIN_DIR}/vault-plugin-identity-delegation
 
 echo "Plugin downloaded successfully!"
 ls -lh ${PLUGIN_DIR}/vault-plugin-identity-delegation

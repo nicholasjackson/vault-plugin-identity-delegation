@@ -41,72 +41,140 @@ curl -sf -X POST "${KEYCLOAK_URL}/admin/realms" \
 
 echo "Demo realm created or already exists!"
 
-# Create demo-app client (for end users)
-echo "Creating demo-app client..."
-curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/clients" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "clientId": "demo-app",
-    "enabled": true,
-    "publicClient": false,
-    "directAccessGrantsEnabled": true,
-    "serviceAccountsEnabled": false,
-    "standardFlowEnabled": true,
-    "implicitFlowEnabled": false,
-    "protocol": "openid-connect",
-    "attributes": {
-      "access.token.lifespan": "3600"
-    },
-    "redirectUris": ["http://localhost:*"],
-    "webOrigins": ["http://localhost:*"]
-  }' || echo "Client might already exist"
+# Create or update demo-app client (for end users)
+echo "Configuring demo-app client..."
 
-echo "demo-app client created!"
+DEMO_APP_CONFIG='{
+  "clientId": "demo-app",
+  "enabled": true,
+  "publicClient": true,
+  "directAccessGrantsEnabled": true,
+  "serviceAccountsEnabled": false,
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "protocol": "openid-connect",
+  "attributes": {
+    "access.token.lifespan": "3600"
+  },
+  "redirectUris": ["http://localhost:*", "http://keycloak.container.local.jmpd.in:8080/*", "http://*.container.local.jmpd.in:*"],
+  "webOrigins": ["*"]
+}'
 
-# Create ai-agent client (for AI agents)
-echo "Creating ai-agent client..."
-curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/clients" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "clientId": "ai-agent",
-    "enabled": true,
-    "publicClient": false,
-    "directAccessGrantsEnabled": true,
-    "serviceAccountsEnabled": true,
-    "standardFlowEnabled": false,
-    "protocol": "openid-connect",
-    "attributes": {
-      "access.token.lifespan": "3600"
-    }
-  }' || echo "Client might already exist"
+# Check if client exists
+DEMO_APP_UUID=$(curl -sf "${KEYCLOAK_URL}/admin/realms/demo/clients?clientId=demo-app" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id // empty')
 
-echo "ai-agent client created!"
-
-# Get the ai-agent client secret
-echo "Retrieving ai-agent client secret..."
-sleep 2  # Give Keycloak a moment to fully create the client
-
-# Get the client UUID
-CLIENT_UUID=$(curl -sf "${KEYCLOAK_URL}/admin/realms/demo/clients?clientId=ai-agent" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id')
-
-if [ -z "$CLIENT_UUID" ] || [ "$CLIENT_UUID" = "null" ]; then
-  echo "Failed to retrieve ai-agent client UUID"
+if [ -n "$DEMO_APP_UUID" ]; then
+  echo "demo-app client exists, updating..."
+  curl -sf -X PUT "${KEYCLOAK_URL}/admin/realms/demo/clients/${DEMO_APP_UUID}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$DEMO_APP_CONFIG"
+  echo "demo-app client updated!"
 else
-  # Get the client secret
-  CLIENT_SECRET=$(curl -sf "${KEYCLOAK_URL}/admin/realms/demo/clients/${CLIENT_UUID}/client-secret" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.value')
-
-  echo "ai-agent client secret: ${CLIENT_SECRET}"
+  echo "Creating demo-app client..."
+  curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/clients" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$DEMO_APP_CONFIG"
+  echo "demo-app client created!"
 fi
 
-# Create demo users
+# Get demo-app client UUID (may have just been created)
+DEMO_APP_UUID=$(curl -sf "${KEYCLOAK_URL}/admin/realms/demo/clients?clientId=demo-app" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id')
+
+# In Keycloak 26, protocol mappers must be on a client scope (not directly on the client).
+# Create a 'permissions' client scope with the mapper, then assign it to demo-app.
+echo "Configuring permissions protocol mapper..."
+
+MAPPER_CONFIG='{
+  "name": "permissions",
+  "protocol": "openid-connect",
+  "protocolMapper": "oidc-usermodel-attribute-mapper",
+  "config": {
+    "claim.name": "permissions",
+    "user.attribute": "permissions",
+    "jsonType.label": "String",
+    "multivalued": "true",
+    "aggregate.attrs": "false",
+    "id.token.claim": "true",
+    "access.token.claim": "true",
+    "userinfo.token.claim": "true"
+  }
+}'
+
+# Create the permissions client scope (idempotent)
+curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/client-scopes" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "permissions",
+    "description": "Maps user permissions attribute into tokens",
+    "protocol": "openid-connect",
+    "attributes": {
+      "include.in.token.scope": "false",
+      "display.on.consent.screen": "false"
+    }
+  }' || true
+
+# Get the scope ID and assign to demo-app as a default scope
+PERMISSIONS_SCOPE_ID=$(curl -sf "${KEYCLOAK_URL}/admin/realms/demo/client-scopes" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[] | select(.name == "permissions") | .id')
+
+if [ -n "$PERMISSIONS_SCOPE_ID" ]; then
+  # Assign as default scope to demo-app
+  curl -sf -X PUT \
+    "${KEYCLOAK_URL}/admin/realms/demo/clients/${DEMO_APP_UUID}/default-client-scopes/${PERMISSIONS_SCOPE_ID}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" || true
+
+  # Add the mapper to the scope
+  curl -sf -X POST \
+    "${KEYCLOAK_URL}/admin/realms/demo/client-scopes/${PERMISSIONS_SCOPE_ID}/protocol-mappers/models" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$MAPPER_CONFIG" || true
+
+  echo "Permissions client scope configured and assigned to demo-app"
+else
+  echo "ERROR: Could not create or find permissions client scope"
+fi
+
+# Register 'permissions' in the User Profile configuration
+# Keycloak 26 requires custom attributes to be declared in the User Profile
+# before they can be stored on users (undeclared attributes are silently dropped)
+echo "Configuring User Profile to include 'permissions' attribute..."
+PROFILE=$(curl -s "${KEYCLOAK_URL}/admin/realms/demo/users/profile" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}")
+
+HAS_PERMISSIONS=$(echo "$PROFILE" | jq '[.attributes[].name] | index("permissions")')
+if [ "$HAS_PERMISSIONS" = "null" ]; then
+  UPDATED_PROFILE=$(echo "$PROFILE" | jq '.attributes += [{
+    "name": "permissions",
+    "displayName": "Permissions",
+    "multivalued": true,
+    "annotations": {},
+    "validations": {},
+    "permissions": {
+      "view": ["admin", "user"],
+      "edit": ["admin"]
+    }
+  }]')
+  curl -s -o /dev/null -X PUT "${KEYCLOAK_URL}/admin/realms/demo/users/profile" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$UPDATED_PROFILE"
+  echo "User Profile updated: 'permissions' attribute registered"
+else
+  echo "User Profile already includes 'permissions' attribute"
+fi
+
+# Create demo users with permissions
 echo "Creating demo users..."
 
-# Create user: john@example.com
-curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/users" \
+# Create user: john@example.com (Customer Service Representative)
+echo "Creating user: John Doe (Customer Service Representative)..."
+JOHN_CREATE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${KEYCLOAK_URL}/admin/realms/demo/users" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -116,15 +184,43 @@ curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/users" \
     "lastName": "Doe",
     "enabled": true,
     "emailVerified": true,
+    "attributes": {
+      "permissions": ["read:customers", "write:customers"]
+    },
     "credentials": [{
       "type": "password",
       "value": "password",
       "temporary": false
     }]
-  }' || echo "User john might already exist"
+  }')
 
-# Create user: jane@example.com
-curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/users" \
+if [ "$JOHN_CREATE_HTTP" = "201" ]; then
+  echo "User john created successfully"
+elif [ "$JOHN_CREATE_HTTP" = "409" ]; then
+  echo "User john already exists, updating permissions..."
+  JOHN_UUID=$(curl -s "${KEYCLOAK_URL}/admin/realms/demo/users?username=john" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id // empty')
+  if [ -n "$JOHN_UUID" ]; then
+    JOHN_EXISTING=$(curl -s "${KEYCLOAK_URL}/admin/realms/demo/users/${JOHN_UUID}" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}")
+    JOHN_UPDATED=$(echo "$JOHN_EXISTING" | jq '. + {
+      "emailVerified": true,
+      "requiredActions": [],
+      "attributes": {"permissions": ["read:customers", "write:customers"]}
+    }')
+    curl -s -o /dev/null -X PUT "${KEYCLOAK_URL}/admin/realms/demo/users/${JOHN_UUID}" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$JOHN_UPDATED"
+    echo "John's account updated!"
+  fi
+else
+  echo "WARNING: User john creation returned HTTP ${JOHN_CREATE_HTTP}"
+fi
+
+# Create user: jane@example.com (Marketing Analyst)
+echo "Creating user: Jane Smith (Marketing Analyst)..."
+JANE_CREATE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${KEYCLOAK_URL}/admin/realms/demo/users" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -134,14 +230,43 @@ curl -sf -X POST "${KEYCLOAK_URL}/admin/realms/demo/users" \
     "lastName": "Smith",
     "enabled": true,
     "emailVerified": true,
+    "attributes": {
+      "permissions": ["read:marketing", "write:marketing", "read:weather"]
+    },
     "credentials": [{
       "type": "password",
       "value": "password",
       "temporary": false
     }]
-  }' || echo "User jane might already exist"
+  }')
+
+if [ "$JANE_CREATE_HTTP" = "201" ]; then
+  echo "User jane created successfully"
+elif [ "$JANE_CREATE_HTTP" = "409" ]; then
+  echo "User jane already exists, updating permissions..."
+  JANE_UUID=$(curl -s "${KEYCLOAK_URL}/admin/realms/demo/users?username=jane" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" | jq -r '.[0].id // empty')
+
+  if [ -n "$JANE_UUID" ]; then
+    JANE_EXISTING=$(curl -s "${KEYCLOAK_URL}/admin/realms/demo/users/${JANE_UUID}" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}")
+    JANE_UPDATED=$(echo "$JANE_EXISTING" | jq '. + {
+      "emailVerified": true,
+      "requiredActions": [],
+      "attributes": {"permissions": ["read:marketing", "write:marketing", "read:weather"]}
+    }')
+    curl -s -o /dev/null -X PUT "${KEYCLOAK_URL}/admin/realms/demo/users/${JANE_UUID}" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$JANE_UPDATED"
+    echo "Jane's account updated!"
+  fi
+else
+  echo "WARNING: User jane creation returned HTTP ${JANE_CREATE_HTTP}"
+fi
 
 echo "Demo users created!"
+
 
 echo ""
 echo "================================"
@@ -152,17 +277,12 @@ echo "Admin Console: ${KEYCLOAK_URL}/admin"
 echo "Admin Credentials: ${KEYCLOAK_ADMIN} / ${KEYCLOAK_ADMIN_PASSWORD}"
 echo ""
 echo "Demo Realm: demo"
-echo "Clients:"
+echo "Client:"
 echo "  - demo-app (public client for users)"
-echo "  - ai-agent (confidential client for AI agents)"
 echo ""
-if [ -n "$CLIENT_SECRET" ] && [ "$CLIENT_SECRET" != "null" ]; then
-  echo "AI Agent Client Secret: ${CLIENT_SECRET}"
-  echo ""
-fi
 echo "Demo Users:"
-echo "  - john@example.com / password"
-echo "  - jane@example.com / password"
+echo "  - john@example.com / password (Customer Service: read:customers, write:customers)"
+echo "  - jane@example.com / password (Marketing: read:marketing, write:marketing, read:weather)"
 echo ""
 echo "JWKS Endpoint: ${KEYCLOAK_URL}/realms/demo/protocol/openid-connect/certs"
 echo "Token Endpoint: ${KEYCLOAK_URL}/realms/demo/protocol/openid-connect/token"

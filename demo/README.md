@@ -1,11 +1,11 @@
-# Vault Token Exchange Plugin Demo
+# Vault Identity Delegation Plugin Demo
 
-This demo provides a complete environment to test the Vault Token Exchange plugin using Jumppad. The demo includes:
+This demo provides a complete environment to test the Vault Identity Delegation plugin using Jumppad. The demo includes:
 
-- **HashiCorp Vault** with the token exchange plugin pre-configured
+- **HashiCorp Vault** with the identity delegation plugin pre-configured
 - **Keycloak** as an OIDC identity provider
 - Pre-configured demo realm, clients, and users
-- Sample roles for token exchange scenarios
+- Sample roles for identity delegation scenarios
 
 ## Prerequisites
 
@@ -61,8 +61,8 @@ If GitHub releases are not available or you want to build from source:
    - Setup scripts will run automatically to configure both services
 
 3. Access the services:
-   - Vault UI: http://localhost:8200/ui (token: `root`)
-   - Keycloak Admin: http://localhost:8080/admin (admin / admin)
+   - Vault UI: http://vault.container.local.jmpd.in:8200/ui (token: `root`)
+   - Keycloak Admin: http://keycloak.container.local.jmpd.in:8080/admin (admin / admin)
 
 ### Manual Setup (Optional)
 
@@ -71,8 +71,7 @@ If you prefer to configure manually or skip auto-configuration:
 1. Start containers only (without running setup scripts):
    ```bash
    cd demo
-   # Comment out the configure_vault and configure_keycloak resources in main.hcl
-   jumppad up
+   jumppad up --var run_scripts=false
    ```
 
 2. Manually run setup scripts when ready:
@@ -80,9 +79,81 @@ If you prefer to configure manually or skip auto-configuration:
    # Configure Keycloak
    ./scripts/setup-keycloak.sh
 
-   # Configure Vault
+   # Configure Vault plugin and identity-delegation roles
    ./scripts/setup-vault.sh
+
+   # Configure Kubernetes auth (requires K8s cluster)
+   ./scripts/setup-k8s-auth.sh
+   ./scripts/setup-vault-k8s.sh
+
+   # Configure AppRole auth
+   ./scripts/setup-approle.sh
    ```
+
+## Demo Personas
+
+### End Users (Keycloak)
+
+| User | Email | Role | Permissions | Description |
+|------|-------|------|-------------|-------------|
+| John Doe | john@example.com | Customer Service Rep | `read:customers`, `write:customers` | Handles customer inquiries, authorized to access customer data |
+| Jane Smith | jane@example.com | Marketing Analyst | `read:marketing`, `write:marketing`, `read:weather` | Analyzes campaign data, can access weather data, no access to customer PII |
+
+Both users have password: `password`
+
+### Agents & Tools (Vault Entities)
+
+| Entity | Type | Scope | Description |
+|--------|------|-------|-------------|
+| customer-agent | AI Agent | `read:customers write:customers` | AI agent that helps with customer service tasks |
+| customers-tool | Tool | `read:customers` | Database query tool for customer lookups (read-only) |
+| weather-tool | Tool | `read:weather` | Weather data retrieval tool (read-only) |
+
+## Authorization Model
+
+The demo implements **dual authorization** using permission intersection. Downstream services check two things:
+
+1. **Agent scope** (`scope` claim): What operations is the agent/tool allowed to perform?
+2. **User permissions** (`subject_claims.permissions`): What is the user authorized for?
+3. **Effective permissions** = `scope ∩ user_permissions` — only operations in both sets are allowed.
+
+### Example: John via customer-agent (ALLOWED)
+
+```json
+{
+  "iss": "https://vault.local",
+  "sub": "john-uuid",
+  "act": { "sub": "customer-agent" },
+  "scope": "read:customers write:customers",
+  "subject_claims": {
+    "email": "john@example.com",
+    "name": "John Doe",
+    "permissions": ["read:customers", "write:customers"]
+  }
+}
+```
+
+Effective: `{read:customers, write:customers} ∩ {read:customers, write:customers}` = **read:customers, write:customers** — request proceeds.
+
+### Example: Jane via customer-agent (DENIED)
+
+```json
+{
+  "iss": "https://vault.local",
+  "sub": "jane-uuid",
+  "act": { "sub": "customer-agent" },
+  "scope": "read:customers write:customers",
+  "subject_claims": {
+    "email": "jane@example.com",
+    "name": "Jane Smith",
+    "permissions": ["read:marketing", "write:marketing", "read:weather"]
+  }
+}
+```
+
+Effective: `{read:customers, write:customers} ∩ {read:marketing, write:marketing, read:weather}` = **empty** — downstream service rejects the request.
+
+> **Note**: The Vault plugin itself does not enforce user permissions — it issues the delegated token regardless. The enforcement happens at the downstream service that validates the token and checks the intersection.
 
 ## What Gets Configured
 
@@ -90,110 +161,251 @@ If you prefer to configure manually or skip auto-configuration:
 
 The demo creates a Keycloak realm called `demo` with:
 
-**Clients:**
-- `demo-app` - Public client for end-user authentication
-- `ai-agent` - Confidential client (for demonstration, not used in token exchange)
+**Client:**
+- `demo-app` — Public client for end-user authentication
 
 **Users:**
-- `john@example.com` / `password`
-- `jane@example.com` / `password`
+- `john@example.com` / `password` — permissions: `read:customers`, `write:customers`
+- `jane@example.com` / `password` — permissions: `read:marketing`, `write:marketing`, `read:weather`
+
+**Protocol Mapper:**
+- `permissions` — Maps the user `permissions` attribute into the access token as a multi-valued claim
 
 **Endpoints:**
-- Token endpoint: `http://localhost:8080/realms/demo/protocol/openid-connect/token`
-- JWKS endpoint: `http://localhost:8080/realms/demo/protocol/openid-connect/certs`
+- Token endpoint: `http://keycloak.container.local.jmpd.in:8080/realms/demo/protocol/openid-connect/token`
+- JWKS endpoint: `http://keycloak.container.local.jmpd.in:8080/realms/demo/protocol/openid-connect/certs`
 
 ### Vault Setup
 
 The demo configures Vault with:
 
 **Plugin Configuration:**
-- Registered and enabled at path: `token-exchange`
+- Registered and enabled at path: `identity-delegation`
 - Connected to Keycloak JWKS endpoint for token validation
 
-**Roles:**
-- `demo-agent` - For document access (scopes: read:documents, write:documents)
-- `user-agent` - For profile access (scopes: read:profile, write:profile)
+**Identity Delegation Roles:**
+- `customer-agent` — For customer data (scope: `read:customers`, `write:customers`)
+- `customers-tool` — Read-only customer access (scope: `read:customers`)
+- `weather-tool` — Weather data access (scope: `read:weather`)
+
+All roles include `permissions` from the user's Keycloak token in `subject_claims`.
+
+**Authentication Methods:**
+- `kubernetes` — K8s service account auth at `kubernetes/` path
+- `demo-auth-mount` — K8s service account auth at `demo-auth-mount/` path
+- `approle` — Application authentication for non-K8s workloads
+
+**Vault Entities (Agents/Tools):**
+- `customer-agent` — Customer service agent
+- `customers-tool` — Customer lookup tool
+- `weather-tool` — Weather data retrieval tool
 
 **Actor Identity:**
 - The plugin uses Vault's built-in entity system for actor identity
 - Actor identity is derived from the Vault token used to call the plugin
-- No separate actor_token parameter is required
+- The `act.sub` claim in the exchanged token contains the entity name
 
-## Testing the Token Exchange
+## Testing Identity Delegation
 
 ### Step 1: Get a User Token from Keycloak
 
 ```bash
-# Get a token for user John
-USER_TOKEN=$(curl -s -X POST "http://localhost:8080/realms/demo/protocol/openid-connect/token" \
+# Get a token for John (has customer permissions)
+JOHN_TOKEN=$(curl -s -X POST "http://keycloak.container.local.jmpd.in:8080/realms/demo/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=john@example.com" \
+  -d "username=john" \
   -d "password=password" \
   -d "grant_type=password" \
   -d "client_id=demo-app" | jq -r '.access_token')
 
-echo "User Token: $USER_TOKEN"
+# Decode to verify permissions claim
+echo $JOHN_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
 
-# Decode the token to see its contents
-echo $USER_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+# Get a token for Jane (has marketing permissions only)
+JANE_TOKEN=$(curl -s -X POST "http://keycloak.container.local.jmpd.in:8080/realms/demo/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=jane" \
+  -d "password=password" \
+  -d "grant_type=password" \
+  -d "client_id=demo-app" | jq -r '.access_token')
+
+echo $JANE_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
 ```
 
-### Step 2: Exchange Token via Vault
+### Step 2: Authenticate Agent to Vault
+
+#### Using AppRole Auth
 
 ```bash
-# Exchange the user token using the demo-agent role
-# Note: Vault uses its own entity system for actor identity (no explicit actor_token needed)
-EXCHANGED_TOKEN=$(curl -s -X POST "http://localhost:8200/v1/token-exchange/token/demo-agent" \
-  -H "X-Vault-Token: root" \
+# Get role ID and secret ID for customer-agent
+export VAULT_ROLE_ID=$(vault read -format=json auth/approle/role/customer-agent/role-id | jq -r '.data.role_id')
+export VAULT_SECRET_ID=$(vault write -format=json -f auth/approle/role/customer-agent/secret-id | jq -r '.data.secret_id')
+
+# Login to Vault as customer-agent
+AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/approle/login" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"subject_token\": \"$USER_TOKEN\"
-  }" | jq -r '.data.token')
-
-echo "Exchanged Token: $EXCHANGED_TOKEN"
-
-# Decode the exchanged token to see the RFC 8693 compliant structure
-echo $EXCHANGED_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+  -d "{\"role_id\": \"$VAULT_ROLE_ID\", \"secret_id\": \"$VAULT_SECRET_ID\"}" | jq -r '.auth.client_token')
 ```
 
-### Expected Token Structure (RFC 8693 Compliant)
+#### Using Kubernetes Auth
 
-The exchanged token should contain:
+```bash
+# Get service account token from K8s secret
+SA_TOKEN=$(kubectl get secret customer-agent-token -n demo -o jsonpath='{.data.token}' | base64 -d)
+
+# Login to Vault using K8s auth
+AGENT_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/demo-auth-mount/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"role\": \"customer-agent\", \"jwt\": \"$SA_TOKEN\"}" | jq -r '.auth.client_token')
+```
+
+### Step 3: Exchange Tokens
+
+```bash
+# Exchange John's token (should produce token with customer permissions)
+JOHN_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/customer-agent" \
+  -H "X-Vault-Token: $AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"subject_token\": \"$JOHN_TOKEN\"}" | jq -r '.data.token')
+
+echo "=== John's delegated token ==="
+echo $JOHN_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+
+# Exchange Jane's token (permissions won't match customer scope)
+JANE_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/customer-agent" \
+  -H "X-Vault-Token: $AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"subject_token\": \"$JANE_TOKEN\"}" | jq -r '.data.token')
+
+echo "=== Jane's delegated token ==="
+echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+```
+
+### Step 4: Verify Downstream Authorization
+
+Compare the `scope` and `subject_claims.permissions` in each token:
+
+```bash
+# John's token: scope and permissions intersect -> ALLOWED
+echo "John's effective permissions:"
+echo $JOHN_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, permissions: .subject_claims.permissions}'
+
+# Jane's token: scope and permissions don't intersect -> DENIED
+echo "Jane's effective permissions:"
+echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, permissions: .subject_claims.permissions}'
+```
+
+### Test customers-tool (Read-Only)
+
+```bash
+# Get customers-tool credentials
+export TOOL_ROLE_ID=$(vault read -format=json auth/approle/role/customers-tool/role-id | jq -r '.data.role_id')
+export TOOL_SECRET_ID=$(vault write -format=json -f auth/approle/role/customers-tool/secret-id | jq -r '.data.secret_id')
+
+TOOL_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/approle/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"role_id\": \"$TOOL_ROLE_ID\", \"secret_id\": \"$TOOL_SECRET_ID\"}" | jq -r '.auth.client_token')
+
+# Exchange John's token via customers-tool role (read-only scope)
+TOOL_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/customers-tool" \
+  -H "X-Vault-Token: $TOOL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"subject_token\": \"$JOHN_TOKEN\"}" | jq -r '.data.token')
+
+# Note: scope is "read:customers" only (not write), even though John has write permissions
+echo $TOOL_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, permissions: .subject_claims.permissions}'
+```
+
+### Validate JWKS Endpoint
+
+Downstream services can validate delegated tokens using the JWKS endpoint:
+
+```bash
+# Get JWKS from Vault (public endpoint, no auth required)
+curl -s "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/jwks" | jq .
+```
+
+## Delegated Token Structure (RFC 8693 Compliant)
+
+The exchanged token is a JWT containing the following claims:
+
+### Standard JWT Claims
+
+| Claim | Type | Description | Source |
+|-------|------|-------------|--------|
+| `iss` | String | Token issuer | Plugin configuration (e.g., `https://vault.local`) |
+| `sub` | String | Subject - the end user's identity | Original subject token's `sub` claim |
+| `aud` | String/Array | Audience | From `actor_template` if specified |
+| `iat` | Number | Issued at timestamp | Current time when token is generated |
+| `exp` | Number | Expiration timestamp | `iat` + TTL from role configuration |
+
+### RFC 8693 Delegation Claims
+
+| Claim | Type | Description | Source |
+|-------|------|-------------|--------|
+| `act` | Object | Actor claim - identifies who is acting on behalf of the user | Role's `actor_template` |
+| `act.sub` | String | Actor subject identifier | Template variable `{{identity.entity.name}}` |
+| `scope` | String | Space-delimited list of delegated permissions | Role's `context` field |
+
+### Custom Extension Claims
+
+| Claim | Type | Description | Source |
+|-------|------|-------------|--------|
+| `subject_claims` | Object | Processed claims from the original user token | Role's `subject_template` |
+| `subject_claims.permissions` | Array | User's fine-grained permissions from Keycloak | `{{identity.subject.permissions}}` |
+
+### Example Token
 
 ```json
 {
   "iss": "https://vault.local",
-  "sub": "john@example.com",
-  "aud": "demo-app",
-  "exp": 1234567890,
-  "iat": 1234564290,
+  "sub": "john-uuid",
+  "aud": "account",
+  "iat": 1699564800,
+  "exp": 1699568400,
   "act": {
-    "sub": "service-account-ai-agent"
+    "sub": "customer-agent"
   },
-  "scope": "read:documents write:documents",
+  "scope": "read:customers write:customers",
   "subject_claims": {
     "email": "john@example.com",
     "name": "John Doe",
-    ...
+    "permissions": ["read:customers", "write:customers"]
   }
 }
 ```
 
-Key features:
-- **`sub`**: The end user (John)
-- **`act.sub`**: The AI agent acting on behalf of the user
-- **`scope`**: The delegated permissions
-- **`subject_claims`**: Original user token claims
+### Claim Details
+
+- **`sub`**: The end user's identity. Preserved from the original Keycloak token.
+
+- **`act.sub`**: The actor (agent/tool) acting on behalf of the user. Populated from the Vault entity name via the `actor_template`. Downstream services use this to identify which agent made the request.
+
+- **`scope`**: The delegated permissions as a space-delimited string. Built from the role's `context` configuration (e.g., `"read:customers,write:customers"` becomes `"read:customers write:customers"`).
+
+- **`subject_claims.permissions`**: The user's fine-grained permissions from Keycloak. Downstream services intersect this with `scope` to determine effective permissions.
+
+- **`subject_claims`**: A namespace containing processed claims from the original user token. The `subject_template` controls which claims are included.
+
+### Template Variables
+
+The `actor_template` and `subject_template` support these variables:
+
+| Variable | Description |
+|----------|-------------|
+| `{{identity.entity.name}}` | Vault entity name of the authenticated agent |
+| `{{identity.entity.id}}` | Vault entity ID |
+| `{{identity.subject.<claim>}}` | Any claim from the original user token (e.g., `{{identity.subject.email}}`) |
 
 ## Verifying RFC 8693 Compliance
 
-The exchanged token follows RFC 8693 (OAuth 2.0 Token Exchange) specification:
+The exchanged token follows [RFC 8693 (OAuth 2.0 Token Exchange)](https://www.rfc-editor.org/rfc/rfc8693.html) specification:
 
-1. Uses standard `act` claim for actor identity (not custom `obo`)
-2. `sub` contains the user identity
-3. `act.sub` contains the agent/actor identity
-4. Scopes are in space-delimited format in `scope` claim
-5. Clear audit trail of delegation
+1. **Standard `act` claim**: Uses the RFC-defined actor claim structure
+2. **User-centric `sub`**: The `sub` claim always contains the user identity
+3. **Actor identification**: `act.sub` contains the agent/actor identity for audit
+4. **Space-delimited scopes**: The `scope` claim uses space-delimited format per OAuth 2.0
+5. **Clear delegation chain**: The token structure provides a clear audit trail of who did what on whose behalf
 
 ## Cleanup
 
@@ -222,7 +434,7 @@ jumppad logs keycloak
 If the plugin fails to register, check if the binary downloaded successfully:
 
 ```bash
-ls -lh demo/build/vault-plugin-token-exchange
+ls -lh demo/build/vault-plugin-identity-delegation
 ```
 
 The plugin binary should be present and executable.
@@ -237,7 +449,7 @@ If the download failed:
 Ensure Keycloak has fully started (can take 30-60 seconds):
 
 ```bash
-curl http://localhost:8080/health/ready
+curl http://keycloak.container.local.jmpd.in:8080/health/ready
 ```
 
 ## Architecture
@@ -246,23 +458,69 @@ curl http://localhost:8080/health/ready
 ┌─────────────────┐
 │   Keycloak      │  OIDC Provider
 │   :8080         │  - Realm: demo
-└────────┬────────┘  - Users & Clients
-         │
-         │ JWKS validation
+└────────┬────────┘  - Users: John (customers), Jane (marketing)
+         │           - Permissions via user attributes
+         │ JWKS validation (subject tokens)
          │
          ▼
+┌─────────────────┐     ┌─────────────────┐
+│   Vault         │     │   Kubernetes    │
+│   :8200         │◄────│   Cluster       │
+│                 │     │   (K3s)         │
+│  Auth Methods:  │     └─────────────────┘
+│  - kubernetes   │            │
+│  - approle      │            │ Service Account
+│                 │            │ Tokens
+│  Plugin:        │            │
+│  - identity-    │     ┌──────┴──────────┐
+│    delegation   │     │ Service Accounts│
+│                 │     │ - customer-agent│
+│  Roles:         │     │ - customers-tool│
+│  - customer-    │     └─────────────────┘
+│    agent        │
+│  - customers-   │
+│    tool         │
+│  - weather-tool │
+└────────┬────────┘
+         │ JWKS (delegated tokens)
+         ▼
 ┌─────────────────┐
-│   Vault         │  Token Exchange
-│   :8200         │  - Plugin enabled
-└─────────────────┘  - Roles configured
+│  Downstream     │  Validates:
+│  Services       │  1. scope ∩ permissions
+│  (validate JWT) │  2. act.sub identity
+└─────────────────┘
 ```
+
+## Quick Reference
+
+### Identity Delegation Roles
+
+| Role | Scope | Use Case |
+|------|-------|----------|
+| `customer-agent` | `read:customers`, `write:customers` | Full customer data access |
+| `customers-tool` | `read:customers` | Read-only customer lookup |
+| `weather-tool` | `read:weather` | Weather data retrieval |
+
+### Auth Methods & Entities
+
+| Auth Method | Path | Roles | Entity |
+|-------------|------|-------|--------|
+| kubernetes | `auth/kubernetes` | customer-agent, customers-tool | Same as role |
+| kubernetes | `auth/demo-auth-mount` | customer-agent, customers-tool | Same as role |
+| approle | `auth/approle` | customer-agent, customers-tool, weather-tool | Same as role |
+
+### Keycloak Test Users
+
+| Email | Password | Permissions | Persona |
+|-------|----------|-------------|---------|
+| john@example.com | password | `read:customers`, `write:customers` | Customer Service Rep |
+| jane@example.com | password | `read:marketing`, `write:marketing`, `read:weather` | Marketing Analyst |
 
 ## Next Steps
 
-- Customize roles with different scopes
-- Add more users and test different scenarios
-- Integrate with resource servers that validate the exchanged tokens
-- Explore delegation chains (multi-hop token exchange)
+- Integrate with a resource server that validates the exchanged tokens and enforces `scope ∩ permissions`
+- Explore delegation chains (multi-hop identity delegation)
+- Add more personas and permission sets for different teams
 
 ## References
 

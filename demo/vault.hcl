@@ -40,7 +40,7 @@ resource "container" "vault" {
   }
 
   volume {
-    source      = "./build"
+    source      = "../bin"
     destination = "/vault/plugins"
   }
 
@@ -48,8 +48,6 @@ resource "container" "vault" {
     local = 8200
     host  = 8200
   }
-
-  privileged = true
 
   health_check {
     timeout = "30s"
@@ -61,11 +59,9 @@ resource "container" "vault" {
 }
 
 # Configure Vault with the plugin
-# This runs locally and can be skipped if you want to configure manually
 resource "exec" "configure_vault" {
-  disabled = true #!variable.run_scripts
-
-  depends_on = ["resource.container.vault"]
+  disabled   = !variable.run_scripts
+  depends_on = ["resource.container.vault", "resource.container.keycloak"]
 
   script = file("./scripts/setup-vault.sh")
 
@@ -73,21 +69,19 @@ resource "exec" "configure_vault" {
     VAULT_ADDR   = "http://localhost:8200"
     VAULT_TOKEN  = "root"
     KEYCLOAK_URL = "http://localhost:8080"
+    PLUGIN_DIR   = "${dir()}/../bin"
   }
 }
 
-# Configure Keycloak realm and clients
-# This runs locally and can be skipped if you want to configure manually
-resource "exec" "configure_keycloak" {
-  disabled = !variable.run_scripts
+# Configure AppRole auth for customer-agent and customers-tool
+resource "exec" "configure_approle" {
+  disabled   = !variable.run_scripts
+  depends_on = ["resource.exec.configure_vault"]
 
-  depends_on = ["resource.container.keycloak"]
-
-  script = file("./scripts/setup-keycloak.sh")
+  script = file("./scripts/setup-approle.sh")
 
   environment = {
-    KEYCLOAK_URL            = "http://localhost:8080"
-    KEYCLOAK_ADMIN          = "admin"
-    KEYCLOAK_ADMIN_PASSWORD = "admin"
+    VAULT_ADDR  = "http://localhost:8200"
+    VAULT_TOKEN = "root"
   }
 }

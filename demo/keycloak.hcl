@@ -33,3 +33,19 @@ resource "container" "keycloak" {
     }
   }
 }
+
+# Configure Keycloak realm and clients
+# This runs locally and can be skipped if you want to configure manually
+resource "exec" "configure_keycloak" {
+  disabled = !variable.run_scripts
+
+  depends_on = ["resource.container.keycloak"]
+
+  script = file("./scripts/setup-keycloak.sh")
+
+  environment = {
+    KEYCLOAK_URL            = "http://localhost:8080"
+    KEYCLOAK_ADMIN          = "admin"
+    KEYCLOAK_ADMIN_PASSWORD = "admin"
+  }
+}

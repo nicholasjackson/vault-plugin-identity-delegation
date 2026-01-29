@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strings"
@@ -336,6 +337,46 @@ func fetchEntity(req *logical.Request, system logical.SystemView) (*logical.Enti
 	return entity, nil
 }
 
+// jsonifyClaimsMap recursively walks a claims map and converts any slice or
+// nested map values into their JSON string representation. This ensures that
+// when mustache renders {{some.array.claim}}, it produces valid JSON (e.g.
+// ["read:customers","write:customers"]) instead of Go's default fmt.Sprint
+// format ([read:customers write:customers]).
+func jsonifyClaimsMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = jsonifyValue(v)
+	}
+	return out
+}
+
+func jsonifyValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return jsonifyClaimsMap(val)
+	case map[string]map[string]any:
+		out := make(map[string]any, len(val))
+		for k, inner := range val {
+			out[k] = jsonifyClaimsMap(inner)
+		}
+		return out
+	case []any:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return v
+		}
+		return string(b)
+	case []string:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return v
+		}
+		return string(b)
+	default:
+		return v
+	}
+}
+
 // processTemplate processes the role template and returns additional claims
 func processTemplate(template string, claims map[string]any) (map[string]any, error) {
 	tmpl, err := mustache.ParseString(template)
@@ -343,7 +384,13 @@ func processTemplate(template string, claims map[string]any) (map[string]any, er
 		return nil, fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	mo := tmpl.Render(claims)
+	// Pre-process claims to JSON-serialize non-scalar values (slices, maps)
+	// so mustache renders them as valid JSON rather than Go's default format
+	jsonClaims := jsonifyClaimsMap(claims)
+
+	// Mustache HTML-escapes {{var}} output by default (e.g. " becomes &quot;).
+	// Since templates produce JSON (not HTML), unescape the rendered output.
+	mo := html.UnescapeString(tmpl.Render(jsonClaims))
 
 	// parse the string as json and return as a map
 	ret := map[string]any{}

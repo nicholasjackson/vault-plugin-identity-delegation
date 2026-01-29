@@ -1123,3 +1123,43 @@ func TestTokenExchange_ActorMetadataOptional(t *testing.T) {
 	require.Contains(t, actorMetadata, "department", "actor_metadata should contain department")
 	require.Equal(t, "AI Services", actorMetadata["department"], "actor_metadata should have correct values")
 }
+
+// TestProcessTemplate_ArrayClaims tests that array claims (like permissions)
+// are rendered as valid JSON arrays in mustache templates
+func TestProcessTemplate_ArrayClaims(t *testing.T) {
+	template := `{"email": "{{identity.subject.email}}", "permissions": {{identity.subject.permissions}}}`
+	claims := map[string]any{
+		"identity": map[string]map[string]any{
+			"subject": {
+				"email":       "john@example.com",
+				"permissions": []any{"read:customers", "write:customers"},
+			},
+		},
+	}
+
+	result, err := processTemplate(template, claims)
+	require.NoError(t, err)
+	require.Equal(t, "john@example.com", result["email"])
+
+	perms, ok := result["permissions"].([]any)
+	require.True(t, ok, "permissions should be a JSON array")
+	require.Len(t, perms, 2)
+	require.Equal(t, "read:customers", perms[0])
+	require.Equal(t, "write:customers", perms[1])
+}
+
+// TestProcessTemplate_StringClaims tests that string claims still work correctly
+func TestProcessTemplate_StringClaims(t *testing.T) {
+	template := `{"name": "{{identity.subject.name}}"}`
+	claims := map[string]any{
+		"identity": map[string]map[string]any{
+			"subject": {
+				"name": "John Doe",
+			},
+		},
+	}
+
+	result, err := processTemplate(template, claims)
+	require.NoError(t, err)
+	require.Equal(t, "John Doe", result["name"])
+}

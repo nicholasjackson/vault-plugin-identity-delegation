@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a HashiCorp Vault plugin for token exchange functionality designed to enable agentic authorization workflows. The plugin implements the OAuth 2.0 Token Exchange specification (RFC 8523) with OIDC tokens to support "on behalf of" scenarios.
+This is a HashiCorp Vault plugin for identity delegation designed to enable agentic authorization workflows. The plugin implements the OAuth 2.0 Token Exchange specification (RFC 8693) with OIDC tokens to support "on behalf of" scenarios.
 
 ### Purpose
 
@@ -21,13 +21,13 @@ When an AI agent needs to call external services or APIs on behalf of a user, th
 - Contains the user's identity and permissions
 - Includes the agent's identity for audit purposes
 - Follows the OAuth 2.0 Token Exchange specification for proper "on behalf of" semantics
-- Can be validated by downstream services that understand the token exchange flow
+- Can be validated by downstream services that understand identity delegation
 
 ## Development Commands
 
 ### Building the Plugin
 ```bash
-go build -o vault-plugin-token-exchange cmd/vault-plugin-token-exchange/main.go
+go build -o vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
 ```
 
 ### Running Tests
@@ -57,17 +57,17 @@ go fmt ./...
 ### Local Development with Vault
 ```bash
 # Build the plugin
-go build -o vault-plugin-token-exchange cmd/vault-plugin-token-exchange/main.go
+go build -o vault-plugin-identity-delegation cmd/vault-plugin-identity-delegation/main.go
 
 # Start Vault in dev mode
 vault server -dev -dev-plugin-dir=./
 
 # In another terminal, register the plugin
 export VAULT_ADDR='http://127.0.0.1:8200'
-vault plugin register -sha256=$(shasum -a 256 vault-plugin-token-exchange | cut -d' ' -f1) secret vault-plugin-token-exchange
+vault plugin register -sha256=$(shasum -a 256 vault-plugin-identity-delegation | cut -d' ' -f1) secret vault-plugin-identity-delegation
 
 # Enable the plugin
-vault secrets enable -path=token-exchange vault-plugin-token-exchange
+vault secrets enable -path=identity-delegation vault-plugin-identity-delegation
 ```
 
 ## Architecture
@@ -91,7 +91,7 @@ Vault plugins follow a specific architecture pattern:
 - **backend.go**: Defines the main backend structure and implements the `logical.Backend` interface
 - **path_*.go**: Path handlers for different API endpoints
 - **client.go**: External service client implementations (if needed)
-- **cmd/vault-plugin-token-exchange/main.go**: Plugin entry point
+- **cmd/vault-plugin-identity-delegation/main.go**: Plugin entry point
 
 ### Testing Approach
 

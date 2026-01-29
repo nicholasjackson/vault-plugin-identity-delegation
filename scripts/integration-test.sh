@@ -160,22 +160,8 @@ echo ""
 
 echo "✓ Example entity and OIDC token setup complete"
 
-# Generate test keys
-echo "Test 1: Generate RSA key pair..."
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
-
-PRIVATE_KEY_FILE="$TEMP_DIR/private_key.pem"
-PUBLIC_KEY_FILE="$TEMP_DIR/public_key.pem"
-
-openssl genrsa -out "$PRIVATE_KEY_FILE" 2048 2>/dev/null
-openssl rsa -in "$PRIVATE_KEY_FILE" -pubout -out "$PUBLIC_KEY_FILE" 2>/dev/null
-
-echo "✓ Keys generated"
-echo ""
-
 # Configure plugin
-echo "Test 2: Configure plugin..."
+echo "Test 1: Configure plugin..."
 
 vault write identity-delegation/config \
     issuer="https://vault.example.com" \
@@ -193,7 +179,7 @@ echo "✓ Plugin configured correctly"
 echo ""
 
 # Create signing keys
-echo "Test 3: Create and manage signing keys..."
+echo "Test 2: Create and manage signing keys..."
 
 # Create key with auto-generated key pair
 vault write identity-delegation/key/test-key \
@@ -227,7 +213,7 @@ echo "✓ Private keys not exposed in read operations"
 echo ""
 
 # Test JWKS endpoint
-echo "Test 4: JWKS endpoint..."
+echo "Test 3: JWKS endpoint..."
 JWKS_OUTPUT=$(curl -s "$VAULT_ADDR/v1/identity-delegation/jwks")
 if ! echo "$JWKS_OUTPUT" | jq -e '.keys | length > 0' > /dev/null; then
     echo "❌ FAIL: JWKS endpoint did not return keys"
@@ -242,7 +228,7 @@ echo "✓ JWKS endpoint working correctly"
 echo ""
 
 # Create roles
-echo "Test 5: Create and manage roles..."
+echo "Test 4: Create and manage roles..."
 
 vault write identity-delegation/role/test-role-1 \
     key="test-key" \
@@ -299,7 +285,7 @@ echo "✓ Role CRUD operations work correctly"
 echo ""
 
 # Note about token exchange testing
-echo "Test 6: Token exchange..."
+echo "Test 5: Token exchange..."
 echo "Note: Full token exchange testing requires properly signed JWTs."
 echo "The Go tests (go test) cover JWT validation and exchange logic."
 echo ""

@@ -117,6 +117,184 @@ echo "  - Bound Namespace: app"
 echo "  - Policies: demo-secrets"
 echo "  - Token TTL: 1h"
 
+# Create policy for identity delegation
+echo "Creating policy for identity delegation..."
+vault policy write identity-delegation - <<EOF
+path "identity-delegation/token/*" {
+  capabilities = ["create", "update"]
+}
+path "identity-delegation/role/*" {
+  capabilities = ["read", "list"]
+}
+EOF
+
+echo "Policy created: identity-delegation"
+
+# Create policy for customer-agent (can request delegated tokens and validate them)
+echo "Creating policy for customer-agent..."
+vault policy write customer-agent - <<EOF
+# Allow access to token exchange endpoint
+path "identity-delegation/token/*" {
+  capabilities = ["create", "update"]
+}
+
+# Allow reading roles
+path "identity-delegation/role/*" {
+  capabilities = ["read", "list"]
+}
+
+# Allow reading JWKS for token validation
+path "identity-delegation/jwks" {
+  capabilities = ["read"]
+}
+
+# Allow reading own identity
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+EOF
+
+echo "Policy created: customer-agent"
+
+# Create customer-agent service account and secret in Kubernetes
+echo "Creating customer-agent service account..."
+kubectl apply -f - <<EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: customer-agent
+  namespace: demo
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: customer-agent-token
+  namespace: demo
+  annotations:
+    kubernetes.io/service-account.name: customer-agent
+type: kubernetes.io/service-account-token
+EOF
+
+echo "Waiting for customer-agent token to be created..."
+sleep 2
+
+# Create Kubernetes auth role for customer-agent
+echo "Creating Kubernetes auth role: customer-agent..."
+vault write auth/demo-auth-mount/role/customer-agent \
+  bound_service_account_names="customer-agent" \
+  bound_service_account_namespaces="demo" \
+  token_ttl="1h" \
+  token_policies="customer-agent"
+
+echo "Role created: customer-agent"
+echo "  - Bound Service Account: customer-agent"
+echo "  - Bound Namespace: demo"
+echo "  - Policies: customer-agent"
+echo "  - Token TTL: 1h"
+
+# Create Vault entity for customer-agent
+echo "Creating Vault entity for customer-agent..."
+CUSTOMER_AGENT_ENTITY_ID=$(vault write -format=json identity/entity \
+  name="customer-agent" \
+  metadata=type="ai-agent" \
+  metadata=service="customer" | jq -r '.data.id')
+
+echo "Customer agent entity created: ${CUSTOMER_AGENT_ENTITY_ID}"
+
+# Get the auth accessor for demo-auth-mount
+K8S_ACCESSOR=$(vault auth list -format=json | jq -r '.["demo-auth-mount/"].accessor')
+
+# Create entity alias linking k8s auth to entity
+echo "Creating entity alias for customer-agent..."
+vault write identity/entity-alias \
+  name="customer-agent" \
+  canonical_id="${CUSTOMER_AGENT_ENTITY_ID}" \
+  mount_accessor="${K8S_ACCESSOR}"
+
+echo "Entity alias created for customer-agent"
+
+# Create policy for customers-tool (can request delegated tokens and validate them)
+echo "Creating policy for customers-tool..."
+vault policy write customers-tool - <<EOF
+# Allow access to token exchange endpoint
+path "identity-delegation/token/*" {
+  capabilities = ["create", "update"]
+}
+
+# Allow reading roles
+path "identity-delegation/role/*" {
+  capabilities = ["read", "list"]
+}
+
+# Allow reading JWKS for token validation
+path "identity-delegation/jwks" {
+  capabilities = ["read"]
+}
+
+# Allow reading own identity
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+EOF
+
+echo "Policy created: customers-tool"
+
+# Create customers-tool service account and secret in Kubernetes
+echo "Creating customers-tool service account..."
+kubectl apply -f - <<EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: customers-tool
+  namespace: demo
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: customers-tool-token
+  namespace: demo
+  annotations:
+    kubernetes.io/service-account.name: customers-tool
+type: kubernetes.io/service-account-token
+EOF
+
+echo "Waiting for customers-tool token to be created..."
+sleep 2
+
+# Create Kubernetes auth role for customers-tool
+echo "Creating Kubernetes auth role: customers-tool..."
+vault write auth/demo-auth-mount/role/customers-tool \
+  bound_service_account_names="customers-tool" \
+  bound_service_account_namespaces="demo" \
+  token_ttl="1h" \
+  token_policies="customers-tool"
+
+echo "Role created: customers-tool"
+echo "  - Bound Service Account: customers-tool"
+echo "  - Bound Namespace: demo"
+echo "  - Policies: customers-tool"
+echo "  - Token TTL: 1h"
+
+# Create Vault entity for customers-tool
+echo "Creating Vault entity for customers-tool..."
+CUSTOMERS_TOOL_ENTITY_ID=$(vault write -format=json identity/entity \
+  name="customers-tool" \
+  metadata=type="tool" \
+  metadata=service="customers" | jq -r '.data.id')
+
+echo "Customers tool entity created: ${CUSTOMERS_TOOL_ENTITY_ID}"
+
+# Create entity alias linking k8s auth to entity
+echo "Creating entity alias for customers-tool..."
+vault write identity/entity-alias \
+  name="customers-tool" \
+  canonical_id="${CUSTOMERS_TOOL_ENTITY_ID}" \
+  mount_accessor="${K8S_ACCESSOR}"
+
+echo "Entity alias created for customers-tool"
+
 # Create a sample KV secret
 echo "Creating sample KV secret at secret/demo/config..."
 vault kv put secret/demo/config \
@@ -138,11 +316,35 @@ echo "  - Role: role1"
 echo "  - Service Account: demo-static-app (namespace: app)"
 echo "  - Policy: demo-secrets"
 echo ""
+echo "Customer agent configured (token exchange and validation):"
+echo "  - Role: customer-agent"
+echo "  - Service Account: customer-agent (namespace: demo)"
+echo "  - Policy: customer-agent (token exchange + JWKS validation)"
+echo "  - Entity: customer-agent"
+echo ""
+echo "Customers tool configured (token exchange and validation):"
+echo "  - Role: customers-tool"
+echo "  - Service Account: customers-tool (namespace: demo)"
+echo "  - Policy: customers-tool (token exchange + JWKS validation)"
+echo "  - Entity: customers-tool"
+echo ""
 echo "Sample KV secret created:"
 echo "  - Path: secret/demo/config"
 echo "  - Keys: api_key, database_url, feature_flags"
 echo ""
-echo "To test the configuration:"
+echo "To test customer-agent authentication:"
+echo "  SA_TOKEN=\$(kubectl get secret customer-agent-token -n demo -o jsonpath='{.data.token}' | base64 -d)"
+echo "  curl -s -X POST 'http://vault.container.local.jmpd.in:8200/v1/auth/demo-auth-mount/login' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d \"{\\\"role\\\": \\\"customer-agent\\\", \\\"jwt\\\": \\\"\$SA_TOKEN\\\"}\" | jq ."
+echo ""
+echo "To test customers-tool authentication:"
+echo "  SA_TOKEN=\$(kubectl get secret customers-tool-token -n demo -o jsonpath='{.data.token}' | base64 -d)"
+echo "  curl -s -X POST 'http://vault.container.local.jmpd.in:8200/v1/auth/demo-auth-mount/login' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d \"{\\\"role\\\": \\\"customers-tool\\\", \\\"jwt\\\": \\\"\$SA_TOKEN\\\"}\" | jq ."
+echo ""
+echo "To test the VSO configuration:"
 echo "  kubectl apply -f demo/vso/auth.yaml"
 echo ""
 echo "To verify the secret sync:"
