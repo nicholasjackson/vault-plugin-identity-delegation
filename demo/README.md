@@ -79,15 +79,22 @@ If you prefer to configure manually or skip auto-configuration:
    # Configure Keycloak
    ./scripts/setup-keycloak.sh
 
-   # Configure Vault plugin and identity-delegation roles
-   ./scripts/setup-vault.sh
+   # Configure Vault identity delegation plugin
+   ./scripts/setup-identity-plugin.sh
 
    # Configure Kubernetes auth (requires K8s cluster)
    ./scripts/setup-k8s-auth.sh
-   ./scripts/setup-vault-k8s.sh
 
    # Configure AppRole auth
    ./scripts/setup-approle.sh
+   ```
+
+3. For live demos, skip only the identity plugin setup:
+   ```bash
+   cd demo
+   jumppad up --var="run_identity_plugin=false"
+   # Then run the plugin setup manually during the demo:
+   ./scripts/setup-identity-plugin.sh
    ```
 
 ## Demo Personas
@@ -107,8 +114,10 @@ Both users have password: `password`
 |--------|------|-------|-------------|
 | customer-agent | AI Agent | `read:customers write:customers` | AI agent that helps with customer service tasks |
 | weather-agent | AI Agent | `read:weather write:weather` | AI agent that helps with weather-related tasks |
-| customers-tool | Tool | `read:customers` | Database query tool for customer lookups (read-only) |
-| weather-tool | Tool | `read:weather` | Weather data retrieval tool (read-only) |
+| customers-tool | Tool | N/A (validates via JWKS) | Database query tool for customer lookups |
+| weather-tool | Tool | N/A (validates via JWKS) | Weather data retrieval tool |
+
+> **Note**: Tools do not have identity-delegation roles. They validate delegated JWTs directly against Vault's JWKS endpoint and enforce `scope ∩ permissions` locally.
 
 ## Authorization Model
 
@@ -184,24 +193,22 @@ The demo configures Vault with:
 - Registered and enabled at path: `identity-delegation`
 - Connected to Keycloak JWKS endpoint for token validation
 
-**Identity Delegation Roles:**
+**Identity Delegation Roles (agents only):**
 - `customer-agent` — For customer data (scope: `read:customers`, `write:customers`)
 - `weather-agent` — For weather data (scope: `read:weather`, `write:weather`)
-- `customers-tool` — Read-only customer access (scope: `read:customers`)
-- `weather-tool` — Weather data access (scope: `read:weather`)
 
-All roles include `permissions` from the user's Keycloak token in `subject_claims`.
+Both roles include `permissions` from the user's Keycloak token in `subject_claims`. Tools do not need identity-delegation roles — they validate delegated JWTs via the JWKS endpoint.
 
 **Authentication Methods:**
 - `kubernetes` — K8s service account auth at `kubernetes/` path
 - `demo-auth-mount` — K8s service account auth at `demo-auth-mount/` path
 - `approle` — Application authentication for non-K8s workloads
 
-**Vault Entities (Agents/Tools):**
-- `customer-agent` — Customer service agent
-- `weather-agent` — Weather service agent
-- `customers-tool` — Customer lookup tool
-- `weather-tool` — Weather data retrieval tool
+**Vault Entities:**
+- `customer-agent` — Customer service AI agent
+- `weather-agent` — Weather data AI agent
+- `customers-tool` — Customer lookup tool (AppRole/K8s auth only, no delegation role)
+- `weather-tool` — Weather data retrieval tool (AppRole/K8s auth only, no delegation role)
 
 **Actor Identity:**
 - The plugin uses Vault's built-in entity system for actor identity
@@ -313,27 +320,6 @@ echo $JANE_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, 
 # Jane via customer-agent: scope={read:customers,write:customers} ∩ permissions={read:marketing,write:marketing,read:weather} -> empty (DENIED)
 echo "Jane via customer-agent:"
 echo $JANE_CUSTOMER_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, permissions: .subject_claims.permissions}'
-```
-
-### Test customers-tool (Read-Only)
-
-```bash
-# Get customers-tool credentials
-export TOOL_ROLE_ID=$(vault read -format=json auth/approle/role/customers-tool/role-id | jq -r '.data.role_id')
-export TOOL_SECRET_ID=$(vault write -format=json -f auth/approle/role/customers-tool/secret-id | jq -r '.data.secret_id')
-
-TOOL_TOKEN=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/auth/approle/login" \
-  -H "Content-Type: application/json" \
-  -d "{\"role_id\": \"$TOOL_ROLE_ID\", \"secret_id\": \"$TOOL_SECRET_ID\"}" | jq -r '.auth.client_token')
-
-# Exchange John's token via customers-tool role (read-only scope)
-TOOL_DELEGATED=$(curl -s -X POST "http://vault.container.local.jmpd.in:8200/v1/identity-delegation/token/customers-tool" \
-  -H "X-Vault-Token: $TOOL_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"subject_token\": \"$JOHN_TOKEN\"}" | jq -r '.data.token')
-
-# Note: scope is "read:customers" only (not write), even though John has write permissions
-echo $TOOL_DELEGATED | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{scope, act, permissions: .subject_claims.permissions}'
 ```
 
 ### Validate JWKS Endpoint
@@ -521,8 +507,8 @@ curl http://keycloak.container.local.jmpd.in:8080/health/ready
 |------|-------|----------|
 | `customer-agent` | `read:customers`, `write:customers` | Full customer data access |
 | `weather-agent` | `read:weather`, `write:weather` | Full weather data access |
-| `customers-tool` | `read:customers` | Read-only customer lookup |
-| `weather-tool` | `read:weather` | Weather data retrieval |
+
+> Tools (`customers-tool`, `weather-tool`) do not have identity-delegation roles. They validate delegated JWTs via the JWKS endpoint.
 
 ### Auth Methods & Entities
 

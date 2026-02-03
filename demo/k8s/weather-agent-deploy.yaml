@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-agent
+  namespace: demo
+  labels:
+    app: weather-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-agent
+  template:
+    metadata:
+      labels:
+        app: weather-agent
+    spec:
+      serviceAccountName: weather-agent
+      containers:
+        - name: weather-agent
+          image: ghcr.io/nicholasjackson/weather-agent:{{app_version}}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8123
+          env:
+            - name: OLLAMA_HOST
+              value: "{{ollama_host}}"
+            - name: VAULT_ADDR
+              value: "http://{{vault_ip}}:8200"
+            - name: VAULT_AUTH_METHOD
+              value: "kubernetes"
+            - name: VAULT_AUTH_MOUNT_POINT
+              value: "demo-auth-mount"
+            - name: VAULT_K8S_ROLE
+              value: "weather-agent"
+            - name: VAULT_IDENTITY_ROLE
+              value: "weather-agent"
+            - name: CUSTOMER_MCP_URI
+              value: "http://customers-tool:8001/mcp"
+            - name: WEATHER_MCP_URI
+              value: "http://weather-tool:8000/mcp"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8123
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8123
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-agent
+  namespace: demo
+  labels:
+    app: weather-agent
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8123
+      protocol: TCP
+  selector:
+    app: weather-agent

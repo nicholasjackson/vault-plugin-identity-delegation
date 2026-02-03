@@ -19,6 +19,35 @@ variable "run_scripts" {
   default = true
 }
 
+variable "run_identity_plugin" {
+  default = true
+}
+
+variable "deploy_agents" {
+  default     = true
+  description = "Deploy agent, tool, and UI workloads to the Kubernetes cluster"
+}
+
+variable "ollama_host" {
+  default     = env("OLLAMA_HOST")
+  description = "Ollama API host address (defaults to OLLAMA_HOST environment variable)"
+}
+
+variable "app_version" {
+  default     = "0.1.2"
+  description = "Version tag for agent, tool, and UI container images"
+}
+
+variable "vault_ip" {
+  default     = "10.10.0.30"
+  description = "IP address of the Vault container, reachable from K8s pods"
+}
+
+variable "openweather_api_key" {
+  default     = env("OPENWEATHER_API_KEY")
+  description = "OpenWeather API key for the weather tool (defaults to OPENWEATHER_API_KEY environment variable)"
+}
+
 # Create an isolated network for the demo
 resource "network" "demo" {
   subnet = "10.10.0.0/16"

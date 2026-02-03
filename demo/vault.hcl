@@ -58,12 +58,13 @@ resource "container" "vault" {
   }
 }
 
-# Configure Vault with the plugin
+# Configure Vault with the identity delegation plugin
+# Set run_identity_plugin=false to skip this during jumppad up (for live demo setup)
 resource "exec" "configure_vault" {
-  disabled   = !variable.run_scripts
+  disabled   = !variable.run_scripts || !variable.run_identity_plugin
   depends_on = ["resource.container.vault", "resource.container.keycloak"]
 
-  script = file("./scripts/setup-vault.sh")
+  script = file("./scripts/setup-identity-plugin.sh")
 
   environment = {
     VAULT_ADDR   = "http://localhost:8200"

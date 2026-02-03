@@ -2,7 +2,7 @@
 set -e
 
 echo "================================"
-echo "Configuring Vault Token Exchange Plugin"
+echo "Configuring Identity Delegation Plugin"
 echo "================================"
 
 # Wait for Vault to be ready
@@ -32,7 +32,7 @@ else
   echo "Plugin SHA256: ${PLUGIN_SHA256}"
 
   # Register the plugin
-  echo "Registering token exchange plugin..."
+  echo "Registering identity delegation plugin..."
   vault plugin register \
     -sha256="${PLUGIN_SHA256}" \
     -command="vault-plugin-identity-delegation" \
@@ -42,7 +42,7 @@ else
   echo "Plugin registered successfully!"
 
   # Enable the plugin
-  echo "Enabling token exchange plugin at path: identity-delegation"
+  echo "Enabling identity delegation plugin at path: identity-delegation"
   vault secrets enable \
     -path=identity-delegation \
     -plugin-name=vault-plugin-identity-delegation \
@@ -79,8 +79,6 @@ vault write identity-delegation/key/demo-key \
 echo "Signing key created: demo-key"
 
 # Create role for customer-agent
-# Note: bound_issuer uses Jumppad FQDN - all clients should use this URL for Keycloak
-# (*.local.jmpd.in resolves to 127.0.0.1)
 echo "Creating customer-agent role..."
 vault write identity-delegation/role/customer-agent \
   key="demo-key" \
@@ -106,32 +104,6 @@ vault write identity-delegation/role/weather-agent \
 
 echo "Weather agent role created: weather-agent"
 
-# Create role for customers-tool (read-only)
-echo "Creating customers-tool role..."
-vault write identity-delegation/role/customers-tool \
-  key="demo-key" \
-  bound_issuer="http://keycloak.container.local.jmpd.in:8080/realms/demo" \
-  bound_audiences="account" \
-  context="read:customers" \
-  ttl="1h" \
-  actor_template='{"act": {"sub": "{{identity.entity.name}}"}}' \
-  subject_template='{"email": "{{identity.subject.email}}", "name": "{{identity.subject.name}}", "permissions": {{identity.subject.permissions}}}'
-
-echo "Customers tool role created: customers-tool"
-
-# Create role for weather-tool (read-only weather data)
-echo "Creating weather-tool role..."
-vault write identity-delegation/role/weather-tool \
-  key="demo-key" \
-  bound_issuer="http://keycloak.container.local.jmpd.in:8080/realms/demo" \
-  bound_audiences="account" \
-  context="read:weather" \
-  ttl="1h" \
-  actor_template='{"act": {"sub": "{{identity.entity.name}}"}}' \
-  subject_template='{"email": "{{identity.subject.email}}", "name": "{{identity.subject.name}}", "permissions": {{identity.subject.permissions}}}'
-
-echo "Weather tool role created: weather-tool"
-
 # Create policy for identity delegation
 echo "Creating identity-delegation policy..."
 vault policy write identity-delegation - <<EOF
@@ -148,19 +120,17 @@ EOF
 
 echo ""
 echo "================================"
-echo "Vault Configuration Complete!"
+echo "Identity Delegation Plugin Configuration Complete!"
 echo "================================"
 echo "Vault Address: ${VAULT_ADDR}"
-echo "Vault Token: ${VAULT_TOKEN}"
 echo ""
 echo "Plugin enabled at: ${VAULT_ADDR}/v1/identity-delegation"
 echo "Available roles:"
 echo "  - customer-agent (scope: read:customers, write:customers)"
 echo "  - weather-agent (scope: read:weather, write:weather)"
-echo "  - customers-tool (scope: read:customers)"
-echo "  - weather-tool (scope: read:weather)"
 echo ""
-echo "To test the plugin:"
+echo "To verify:"
 echo "  vault read identity-delegation/config"
 echo "  vault list identity-delegation/role"
+echo "  vault read identity-delegation/role/customer-agent"
 echo ""

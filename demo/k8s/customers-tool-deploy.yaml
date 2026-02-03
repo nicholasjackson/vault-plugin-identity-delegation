@@ -1,0 +1,53 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customers-tool
+  namespace: demo
+  labels:
+    app: customers-tool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customers-tool
+  template:
+    metadata:
+      labels:
+        app: customers-tool
+    spec:
+      serviceAccountName: customers-tool
+      containers:
+        - name: customers-tool
+          image: ghcr.io/nicholasjackson/customer-tool:{{app_version}}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          env:
+            - name: VAULT_ADDR
+              value: "http://{{vault_ip}}:8200"
+            - name: VAULT_IDENTITY_PATH
+              value: "identity-delegation"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customers-tool
+  namespace: demo
+  labels:
+    app: customers-tool
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8001
+      targetPort: 8001
+      protocol: TCP
+  selector:
+    app: customers-tool

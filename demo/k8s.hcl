@@ -59,6 +59,102 @@ resource "exec" "configure_vault_k8s" {
   }
 }
 
+# Template and deploy agent/tool/UI workloads when deploy_agents is enabled
+resource "template" "chat_ui" {
+  disabled = !variable.deploy_agents
+
+  source      = file("./k8s/chat-ui.yaml")
+  destination = "${data("deploy")}/chat-ui.yaml"
+
+  variables = {
+    app_version = variable.app_version
+    vault_ip    = variable.vault_ip
+  }
+}
+
+resource "template" "customer_agent" {
+  disabled = !variable.deploy_agents
+
+  source      = file("./k8s/customer-agent-deploy.yaml")
+  destination = "${data("deploy")}/customer-agent-deploy.yaml"
+
+  variables = {
+    app_version = variable.app_version
+    ollama_host = variable.ollama_host
+    vault_ip    = variable.vault_ip
+  }
+}
+
+resource "template" "weather_agent" {
+  disabled = !variable.deploy_agents
+
+  source      = file("./k8s/weather-agent-deploy.yaml")
+  destination = "${data("deploy")}/weather-agent-deploy.yaml"
+
+  variables = {
+    app_version = variable.app_version
+    ollama_host = variable.ollama_host
+    vault_ip    = variable.vault_ip
+  }
+}
+
+resource "template" "customers_tool" {
+  disabled = !variable.deploy_agents
+
+  source      = file("./k8s/customers-tool-deploy.yaml")
+  destination = "${data("deploy")}/customers-tool-deploy.yaml"
+
+  variables = {
+    app_version = "0.1.3"
+    vault_ip    = variable.vault_ip
+  }
+}
+
+resource "template" "weather_tool" {
+  disabled = !variable.deploy_agents
+
+  source      = file("./k8s/weather-tool-deploy.yaml")
+  destination = "${data("deploy")}/weather-tool-deploy.yaml"
+
+  variables = {
+    app_version         = variable.app_version
+    vault_ip            = variable.vault_ip
+    openweather_api_key = variable.openweather_api_key
+  }
+}
+
+resource "k8s_config" "service_accounts" {
+  disabled   = !variable.deploy_agents
+  cluster    = resource.k8s_cluster.k3s
+  depends_on = ["resource.helm.vault_secrets_operator"]
+
+  paths = [
+    "./k8s/namespace.yaml",
+    "./k8s/agent-service-accounts.yaml",
+    "./k8s/vault-token-reviewer.yaml",
+  ]
+
+  wait_until_ready = true
+}
+
+resource "k8s_config" "agent_deployments" {
+  disabled = !variable.deploy_agents
+  cluster  = resource.k8s_cluster.k3s
+  depends_on = [
+    "resource.k8s_config.service_accounts",
+  ]
+
+  paths = [
+    resource.template.chat_ui.destination,
+    resource.template.customer_agent.destination,
+    resource.template.weather_agent.destination,
+    resource.template.customers_tool.destination,
+    resource.template.weather_tool.destination,
+  ]
+
+  wait_until_ready = true
+}
+
 resource "ingress" "chat_ui" {
   port = 3001
 

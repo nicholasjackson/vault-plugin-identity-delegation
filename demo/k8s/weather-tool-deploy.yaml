@@ -1,0 +1,55 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-tool
+  namespace: demo
+  labels:
+    app: weather-tool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weather-tool
+  template:
+    metadata:
+      labels:
+        app: weather-tool
+    spec:
+      serviceAccountName: weather-tool
+      containers:
+        - name: weather-tool
+          image: ghcr.io/nicholasjackson/weather-tool:{{app_version}}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: VAULT_ADDR
+              value: "http://{{vault_ip}}:8200"
+            - name: VAULT_IDENTITY_PATH
+              value: "identity-delegation"
+            - name: OPENWEATHER_API_KEY
+              value: "{{openweather_api_key}}"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-tool
+  namespace: demo
+  labels:
+    app: weather-tool
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+  selector:
+    app: weather-tool
