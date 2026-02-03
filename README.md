@@ -10,6 +10,32 @@ This plugin enables AI agents and services to exchange existing OIDC tokens for 
 - **Context** - Delegated scopes that restrict the token's permissions
 - "On behalf of" semantics per RFC 8693
 
+## Interactive Demo
+
+Want to see the plugin in action? The demo environment provides a complete Zero Trust Agentic Security setup with:
+
+- **Chat UI** - Web interface for interacting with AI agents
+- **AI Agents** - Customer and Weather agents running on Kubernetes
+- **Keycloak** - OIDC identity provider with demo users
+- **Vault** - Identity delegation plugin with Kubernetes auth
+
+![Demo Screenshot](demo/images/home.png)
+
+**Get started:**
+
+```bash
+cd demo
+jumppad up
+```
+
+Then open http://chat.container.local.jmpd.in:3000 in your browser.
+
+See [demo/Demo.md](demo/Demo.md) for the full walkthrough guide.
+
+The demo uses the [Zero Trust Agentic AI Demo Application](https://github.com/nicholasjackson/demo-zero-trust-agentic-ai) which includes the Chat UI, agents, and tools.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
